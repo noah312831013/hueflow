@@ -1,0 +1,7 @@
+.DS_Store
+node_modules/
+.env*
+.vercel/
+# Build outputs (native/build.sh); the site's download zip is copied from there.
+native/build/
+site/downloads/
