@@ -1,9 +1,12 @@
-// Live ShaderGradient behind the landing page hero. window.setHero(name) swaps presets (used by the gallery).
+// Live ShaderGradients for the landing page: the hero (window.setHero(name) swaps presets, used by the gallery) and
+// the "Make it yours" editor, whose controls mirror the app's editor tabs.
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ShaderGradientCanvas, ShaderGradient, presets } from '@shadergradient/react';
+import { setPatternProps } from './patterns.js';
 
 const byName = Object.fromEntries(Object.values(presets).map((p) => [p.title, p.props]));
+const canvasProps = { pixelDensity: 1, fov: 45, pointerEvents: 'none', envBasePath: 'assets/hdr/' };
 
 function Hero() {
   const [props, setProps] = useState(byName.Universe);
@@ -11,13 +14,137 @@ function Hero() {
     window.setHero = (name) => byName[name] && setProps(byName[name]);
   }, []);
   return (
-    <ShaderGradientCanvas style={{ position: 'absolute', inset: 0 }} pixelDensity={1} fov={45} pointerEvents="none" lazyLoad={false} envBasePath="assets/hdr/">
+    <ShaderGradientCanvas style={{ position: 'absolute', inset: 0 }} lazyLoad={false} {...canvasProps}>
       <ShaderGradient {...props} control="props" />
     </ShaderGradientCanvas>
   );
 }
 
-// Static image stays as the background if WebGL is unavailable.
+// Same keys, labels and ranges as the app's editor (native/App/GalleryView.swift). Pattern keys go to
+// src/patterns.js's uniforms instead of ShaderGradient.
+const patternKeys = ['shapePattern', 'shapeSharpness', 'colorPattern', 'colorScale', 'colorSharpness'];
+const patternNames = [['noise', 'Noise'], ['warp', 'Warp'], ['cells', 'Cells'], ['ridged', 'Ridged'], ['waves', 'Waves']];
+const hasColorPattern = (p) => (p.colorPattern ?? 'position') !== 'position';
+const isSphere = (p) => p.type === 'sphere';
+const isEnv = (p) => p.lightType === 'env';
+const onOff = [['on', 'On'], ['off', 'Off']];
+const tabs = {
+  Shape: [
+    { key: 'type', label: 'Type', options: [['plane', 'Plane'], ['waterPlane', 'Water'], ['sphere', 'Sphere']] },
+    { key: 'uSpeed', label: 'Speed', range: [0, 2, 0.1] },
+    { key: 'uStrength', label: 'Strength', range: [0, 10, 0.1] },
+    { key: 'uDensity', label: 'Density', range: [0, 7, 0.1] },
+    { key: 'uFrequency', label: 'Frequency', range: [0, 10, 0.1], show: isSphere },
+    { key: 'uAmplitude', label: 'Spiral', range: [0, 10, 0.1], show: isSphere },
+    { key: 'shapePattern', label: 'Pattern', options: patternNames, fallback: 'noise' },
+    { key: 'shapeSharpness', label: 'Sharpness', range: [0, 1, 0.05], fallback: 0.5 },
+  ],
+  Colors: [
+    { key: 'color1', label: 'Color 1', color: true },
+    { key: 'color2', label: 'Color 2', color: true },
+    { key: 'color3', label: 'Color 3', color: true },
+    { key: 'colorPattern', label: 'Pattern', options: [['position', 'Gradient'], ...patternNames], fallback: 'position' },
+    { key: 'colorScale', label: 'Scale', range: [0.1, 5, 0.1], show: hasColorPattern, fallback: 1 },
+    { key: 'colorSharpness', label: 'Sharpness', range: [0, 1, 0.05], show: hasColorPattern, fallback: 0.5 },
+  ],
+  Effects: [
+    { key: 'grain', label: 'Grain', options: onOff },
+    { key: 'lightType', label: 'Lighting', options: [['3d', 'Lights'], ['env', 'Environment']] },
+    { key: 'brightness', label: 'Brightness', range: [0.1, 3, 0.1], show: (p) => !isEnv(p) },
+    { key: 'envPreset', label: 'Environment', options: [['city', 'City'], ['dawn', 'Dawn'], ['lobby', 'Lobby']], show: isEnv },
+    { key: 'reflection', label: 'Reflection', range: [0, 1, 0.1], show: isEnv },
+  ],
+  Camera: [
+    { key: 'cAzimuthAngle', label: 'Azimuth', range: [0, 360, 1] },
+    { key: 'cPolarAngle', label: 'Polar', range: [0, 180, 1] },
+    { key: 'cDistance', label: 'Distance', range: [0, 20, 0.1] },
+    { key: 'cameraZoom', label: 'Zoom', range: [0.1, 30, 0.1] },
+  ],
+};
+
+function Control({ spec, props, set }) {
+  const v = props[spec.key] ?? spec.fallback;
+  if (spec.options && spec.options.length > 4) {
+    // Like the app: more than 4 segments don't fit the panel.
+    return (
+      <label className="ctl">
+        <span>{spec.label}</span>
+        <select value={v} onChange={(e) => set(spec.key, e.target.value)}>
+          {spec.options.map(([value, text]) => <option key={value} value={value}>{text}</option>)}
+        </select>
+      </label>
+    );
+  }
+  if (spec.options) {
+    return (
+      <div className="ctl">
+        <span>{spec.label}</span>
+        <div className="seg" role="radiogroup" aria-label={spec.label}>
+          {spec.options.map(([value, text]) => (
+            <button key={value} role="radio" aria-checked={v === value} className={v === value ? 'on' : ''} onClick={() => set(spec.key, value)}>{text}</button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  if (spec.color) {
+    return (
+      <label className="ctl row">
+        <span>{spec.label}</span>
+        <input type="color" value={v} onChange={(e) => set(spec.key, e.target.value)} />
+      </label>
+    );
+  }
+  const [lo, hi, step] = spec.range;
+  const n = Math.min(hi, Math.max(lo, Number(v ?? lo)));
+  return (
+    <label className="ctl">
+      <span>{spec.label}<output>{step < 0.1 ? n.toFixed(2) : step < 1 ? n.toFixed(1) : n}</output></span>
+      <input type="range" min={lo} max={hi} step={step} value={n} onChange={(e) => set(spec.key, Number(e.target.value))} />
+    </label>
+  );
+}
+
+function Editor() {
+  const [preset, setPreset] = useState('Halo');
+  const [props, setProps] = useState(byName.Halo);
+  const [tab, setTab] = useState('Shape');
+  const set = (key, value) => setProps((p) => ({ ...p, [key]: value }));
+  const pick = (name) => { setPreset(name); setProps(byName[name]); };
+  useEffect(() => setPatternProps(props), [props]);
+  const gradientProps = Object.fromEntries(Object.entries(props).filter(([k]) => !patternKeys.includes(k)));
+  return (
+    <>
+      <div className="editor-stage">
+        <ShaderGradientCanvas style={{ position: 'absolute', inset: 0 }} lazyLoad {...canvasProps}>
+          <ShaderGradient {...gradientProps} control="props" />
+        </ShaderGradientCanvas>
+      </div>
+      <div className="editor-panel">
+        <div className="chips" aria-label="Start from">
+          {Object.keys(byName).map((name) => (
+            <button key={name} className={name === preset ? 'on' : ''} onClick={() => pick(name)}>{name}</button>
+          ))}
+        </div>
+        <div className="tabs" role="tablist">
+          {Object.keys(tabs).map((t) => (
+            <button key={t} role="tab" aria-selected={t === tab} className={t === tab ? 'on' : ''} onClick={() => setTab(t)}>{t}</button>
+          ))}
+        </div>
+        <div className="ctls">
+          {tabs[tab].filter((s) => !s.show || s.show(props)).map((s) => <Control key={s.key} spec={s} props={props} set={set} />)}
+        </div>
+        <button className="reset" onClick={() => pick(preset)}>Reset {preset}</button>
+      </div>
+    </>
+  );
+}
+
+// Static images stay in place if WebGL is unavailable.
 try {
-  if (document.createElement('canvas').getContext('webgl2')) createRoot(document.getElementById('hero-canvas')).render(<Hero />);
+  if (document.createElement('canvas').getContext('webgl2')) {
+    createRoot(document.getElementById('hero-canvas')).render(<Hero />);
+    const editor = document.getElementById('editor-root');
+    if (editor) { editor.classList.add('live'); createRoot(editor).render(<Editor />); }
+  }
 } catch {}

@@ -24,6 +24,12 @@ struct Config: Codable {
     var pauseOnBattery = true
     var pauseInFullScreen = true
     var antialias = false
+    // Performance (Performance submenu); each saves GPU with little or no visible change.
+    var lowerFrameRate = true    // wallpapers at 30 fps instead of 60
+    var halfResolution = true    // wallpapers' 3D scene at half size, grain at full size
+    var pauseWhenCovered = true  // pause a wallpaper while other windows hide it
+    var tileMemory = true        // depth/MSAA buffers in GPU tile memory
+    var saveEnergy = true        // 15 fps in Low Power Mode or when the Mac runs hot
     var hideDockIcon = false
     var saver = SaverSettings()
 
@@ -40,6 +46,11 @@ struct Config: Codable {
         pauseInFullScreen = try c.decodeIfPresent(Bool.self, forKey: .pauseInFullScreen) ?? true
         hideDockIcon = try c.decodeIfPresent(Bool.self, forKey: .hideDockIcon) ?? false
         antialias = try c.decodeIfPresent(Bool.self, forKey: .antialias) ?? false
+        lowerFrameRate = try c.decodeIfPresent(Bool.self, forKey: .lowerFrameRate) ?? true
+        halfResolution = try c.decodeIfPresent(Bool.self, forKey: .halfResolution) ?? true
+        pauseWhenCovered = try c.decodeIfPresent(Bool.self, forKey: .pauseWhenCovered) ?? true
+        tileMemory = try c.decodeIfPresent(Bool.self, forKey: .tileMemory) ?? true
+        saveEnergy = try c.decodeIfPresent(Bool.self, forKey: .saveEnergy) ?? true
         saver = try c.decodeIfPresent(SaverSettings.self, forKey: .saver) ?? SaverSettings()
     }
 }
@@ -74,6 +85,7 @@ final class Store: ObservableObject {
     init() {
         if let data = try? Data(contentsOf: Self.configURL), let c = try? JSONDecoder().decode(Config.self, from: data) { cfg = c }
         Renderer.shared.antialias = cfg.antialias
+        Renderer.shared.tileMemory = cfg.tileMemory
     }
 
     /// Re-applies everything after the license state changes.
@@ -88,6 +100,10 @@ final class Store: ObservableObject {
         changed()
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.changed() }
+        }
+        // Resume the moment a covered wallpaper shows again (the 1 s poll would lag).
+        NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.applyPause() }
         }
         DistributedNotificationCenter.default().addObserver(forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.stopSaver() }
@@ -151,11 +167,13 @@ final class Store: ObservableObject {
         changed(rebuild: false)
     }
 
-    func setPaused(_ on: Bool) { cfg.paused = on; changed(rebuild: false) }
-    func setPauseOnBattery(_ on: Bool) { cfg.pauseOnBattery = on; changed(rebuild: false) }
-    func setPauseInFullScreen(_ on: Bool) { cfg.pauseInFullScreen = on; changed(rebuild: false) }
     /// Live views pick it up on their next frame (paused wallpapers on resume).
     func setAntialias(_ on: Bool) { cfg.antialias = on; Renderer.shared.antialias = on; changed(rebuild: false) }
+    func toggle(_ option: WritableKeyPath<Config, Bool>) {
+        cfg[keyPath: option].toggle()
+        Renderer.shared.tileMemory = cfg.tileMemory // views rebuild their buffers on the next frame
+        changed(rebuild: false)
+    }
 
     /// Login item state lives in macOS (System Settings › General › Login Items), not in our config.
     var opensAtLogin: Bool { SMAppService.mainApp.status == .enabled }
@@ -273,12 +291,23 @@ final class Store: ObservableObject {
     /// Wallpapers are hidden behind the screen saver and full-screen windows, so they pause then.
     private func applyPause() {
         let all = cfg.paused || !savers.isEmpty || (cfg.pauseOnBattery && onBattery)
-        let covered = cfg.pauseInFullScreen && !all ? fullScreenDisplays : []
+        let fullScreen = cfg.pauseInFullScreen && !all ? fullScreenDisplays : []
+        let fps = wallpaperFPS
         for w in desktops {
             guard let v = w.contentView as? GradientView else { continue }
-            let paused = all || covered.contains(w.screen?.displayID ?? 0)
+            let hidden = cfg.pauseWhenCovered && !w.occlusionState.contains(.visible)
+            let paused = all || hidden || fullScreen.contains(w.screen?.displayID ?? 0)
             if v.isPaused != paused { v.isPaused = paused }
+            if v.preferredFramesPerSecond != fps { v.preferredFramesPerSecond = fps }
+            v.sceneScale = cfg.halfResolution ? 0.5 : 1
         }
+    }
+
+    /// Wallpapers move slowly, so 30 fps looks the same as 60; Low Power Mode or a hot Mac drops to 15.
+    private var wallpaperFPS: Int {
+        let info = ProcessInfo.processInfo
+        if cfg.saveEnergy && (info.isLowPowerModeEnabled || info.thermalState == .serious || info.thermalState == .critical) { return 15 }
+        return cfg.lowerFrameRate ? 30 : 60
     }
 
     /// Displays covered edge to edge by a normal window on the current Space (full-screen apps, borderless games/video).
@@ -402,31 +431,54 @@ final class Store: ObservableObject {
     private func updateMenu() {
         let m = NSMenu()
         m.autoenablesItems = false
-        func item(_ title: String, checked: Bool? = nil, enabled: Bool = true, _ action: @escaping () -> Void) {
+        func item(_ title: String, checked: Bool? = nil, in menu: NSMenu? = nil, _ action: @escaping () -> Void) {
             let i = MenuItem(title: title, action: action)
             if let checked { i.state = checked ? .on : .off }
-            i.isEnabled = enabled
+            (menu ?? m).addItem(i)
+        }
+        func toggles(_ list: [(String, WritableKeyPath<Config, Bool>)], in menu: NSMenu) {
+            for (title, option) in list { item(title, checked: cfg[keyPath: option], in: menu) { [weak self] in self?.toggle(option) } }
+        }
+        func submenu(_ title: String, _ fill: (NSMenu) -> Void) {
+            let sub = NSMenu()
+            sub.autoenablesItems = false
+            fill(sub)
+            let i = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            i.submenu = sub
             m.addItem(i)
         }
+
+        // Everyday actions at the top level; settings grouped in submenus.
         item("Open Hueflow") { [weak self] in self?.onShowGallery() }
+        item("Pause", checked: cfg.paused) { [weak self] in self?.toggle(\.paused) }
+        if !cfg.recent.isEmpty {
+            m.addItem(.separator())
+            m.addItem(.sectionHeader(title: "Recent"))
+            let current = cfg.default?.props.key
+            for e in cfg.recent.prefix(5) { item(e.name, checked: e.props.key == current) { [weak self] in self?.apply(e) } }
+        }
         m.addItem(.separator())
-        item("Recent", enabled: false) {}
-        let current = cfg.default?.props.key
-        for e in cfg.recent { item(e.name, checked: e.props.key == current) { [weak self] in self?.apply(e) } }
+        submenu("Screen Saver") { sub in
+            item("Start When Idle", checked: cfg.saver.enabled, in: sub) { [weak self] in self?.updateSaver { $0.enabled.toggle() } }
+            item("Start Now", in: sub) { [weak self] in self?.startSaver() }
+        }
+        submenu("Auto-Pause") { sub in
+            toggles([("On Battery", \.pauseOnBattery), ("In Full Screen", \.pauseInFullScreen), ("When Covered", \.pauseWhenCovered)], in: sub)
+        }
+        submenu("Quality & Performance") { sub in
+            item("Antialiasing", checked: cfg.antialias, in: sub) { [weak self] in self?.setAntialias(!(self?.cfg.antialias ?? false)) }
+            sub.addItem(.separator())
+            toggles([("30 fps Wallpaper", \.lowerFrameRate), ("Half-Resolution 3D", \.halfResolution),
+                     ("Tile Memory Buffers", \.tileMemory), ("Slow Down in Low Power Mode or When Hot", \.saveEnergy)], in: sub)
+        }
+        submenu("Displays") { sub in
+            for d in displays { item("Show on \(d.label)", checked: isEnabled(d.id), in: sub) { [weak self] in self?.setEnabled(d.id, !(self?.isEnabled(d.id) ?? true)) } }
+        }
         m.addItem(.separator())
-        item("Screen Saver", checked: cfg.saver.enabled) { [weak self] in self?.updateSaver { $0.enabled.toggle() } }
-        item("Start Screen Saver Now") { [weak self] in self?.startSaver() }
-        m.addItem(.separator())
-        item("Pause", checked: cfg.paused) { [weak self] in self?.setPaused(!(self?.cfg.paused ?? false)) }
-        item("Pause on Battery", checked: cfg.pauseOnBattery) { [weak self] in self?.setPauseOnBattery(!(self?.cfg.pauseOnBattery ?? true)) }
-        item("Pause in Full Screen", checked: cfg.pauseInFullScreen) { [weak self] in self?.setPauseInFullScreen(!(self?.cfg.pauseInFullScreen ?? true)) }
-        item("Antialiasing", checked: cfg.antialias) { [weak self] in self?.setAntialias(!(self?.cfg.antialias ?? false)) }
         item("Open at Login", checked: opensAtLogin) { [weak self] in self?.setOpensAtLogin(!(self?.opensAtLogin ?? false)) }
         item("Hide Dock Icon", checked: cfg.hideDockIcon) { [weak self] in self?.setHideDockIcon(!(self?.cfg.hideDockIcon ?? false)) }
         m.addItem(.separator())
-        for d in displays { item("Show on \(d.label)", checked: isEnabled(d.id)) { [weak self] in self?.setEnabled(d.id, !(self?.isEnabled(d.id) ?? true)) } }
-        m.addItem(.separator())
-        item("Quit") { NSApp.terminate(nil) }
+        item("Quit Hueflow") { NSApp.terminate(nil) }
         statusItem?.menu = m
     }
 }

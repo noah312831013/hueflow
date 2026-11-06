@@ -362,6 +362,10 @@ final class Renderer {
     /// 4× MSAA on the 3D scene pass: smooths mesh edges (sphere silhouette, plane folds) at some GPU cost.
     var antialias = false
     static let msaaSamples = 4
+    /// Depth and MSAA buffers live only in on-chip tile memory (Apple GPUs; Intel falls back to .private):
+    /// less memory and bandwidth, identical image, since neither is read after the pass.
+    var tileMemory = true
+    private lazy var memorylessOK = device.supportsFamily(.apple1)
     private let finalPipeline: MTLRenderPipelineState
     private let depthState: MTLDepthStencilState
     private var meshes: [SIMD2<Int>: (vertices: MTLBuffer, indices: MTLBuffer, count: Int)] = [:]
@@ -484,17 +488,37 @@ final class Renderer {
     /// `msaa` is the multisampled color target resolved into `scene`; nil when antialiasing is off.
     typealias Targets = (scene: MTLTexture, depth: MTLTexture, msaa: MTLTexture?)
 
-    func makeTargets(width: Int, height: Int) -> Targets {
+    /// The scene pass resolution for a `width`×`height` output: `scale` < 1 renders the 3D scene smaller and the final
+    /// pass scales it up (the gradient is smooth, so it barely shows); grain is always drawn at the full size.
+    static func sceneSize(width: Int, height: Int, scale: Float) -> (Int, Int) {
+        (max(1, Int((Float(width) * scale).rounded())), max(1, Int((Float(height) * scale).rounded())))
+    }
+
+    func makeTargets(width: Int, height: Int, scale: Float = 1) -> Targets {
+        let (w, h) = Renderer.sceneSize(width: width, height: height, scale: scale)
         let n = antialias ? Renderer.msaaSamples : 1
-        func tex(_ f: MTLPixelFormat, _ usage: MTLTextureUsage, samples: Int) -> MTLTexture {
-            let t = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: f, width: width, height: height, mipmapped: false)
+        let transient: MTLStorageMode = tileMemory && memorylessOK ? .memoryless : .private
+        func tex(_ f: MTLPixelFormat, _ usage: MTLTextureUsage, samples: Int, storage: MTLStorageMode = .private) -> MTLTexture {
+            let t = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: f, width: w, height: h, mipmapped: false)
             if samples > 1 { t.textureType = .type2DMultisample; t.sampleCount = samples }
             t.usage = usage
-            t.storageMode = .private
+            t.storageMode = storage
             return device.makeTexture(descriptor: t)!
         }
-        return (tex(.rgba16Float, [.renderTarget, .shaderRead], samples: 1), tex(.depth32Float, .renderTarget, samples: n),
-                n > 1 ? tex(.rgba16Float, .renderTarget, samples: n) : nil)
+        return (tex(.rgba16Float, [.renderTarget, .shaderRead], samples: 1), tex(.depth32Float, .renderTarget, samples: n, storage: transient),
+                n > 1 ? tex(.rgba16Float, .renderTarget, samples: n, storage: transient) : nil)
+    }
+
+    /// A still sized `pointSize` × `scale` pixels, with grain at the live views' scale. The grain's 2 pt dot grid aliases
+    /// into moiré when resampled, so render 3× larger and filter down. Used by the gallery cards and the website.
+    func thumbnail(_ props: Props, pointSize: CGSize, scale: Int = 2, elapsed: Double = 3.5) -> CGImage? {
+        let w = Int(pointSize.width) * scale, h = Int(pointSize.height) * scale
+        guard let big = snapshot(props, width: w * 3, height: h * 3, elapsed: elapsed, pointSize: pointSize),
+              let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue) else { return nil }
+        ctx.interpolationQuality = .high
+        ctx.draw(big, in: CGRect(x: 0, y: 0, width: w, height: h))
+        return ctx.makeImage()
     }
 
     /// Offscreen render for thumbnails (a couple of seconds into the animation).
@@ -535,6 +559,9 @@ final class GradientView: MTKView, MTKViewDelegate {
     private var start = CACurrentMediaTime()
     private var last = CACurrentMediaTime()
     private var targets: Renderer.Targets?
+    private var targetsSpec = SIMD4<Int>() // drawable w, h, scene scale ‰, msaa | tile memory: rebuild targets when any changes
+    /// Scene pass resolution relative to the drawable (see Renderer.sceneSize).
+    var sceneScale: Float = 1
 
     init(props: Props = [:]) {
         super.init(frame: .zero, device: Renderer.shared.device)
@@ -573,8 +600,11 @@ final class GradientView: MTKView, MTKViewDelegate {
         last = now
         guard let drawable = currentDrawable, let cmd = Renderer.shared.queue.makeCommandBuffer() else { return }
         let w = drawable.texture.width, h = drawable.texture.height
-        if targets == nil || targets!.scene.width != w || targets!.scene.height != h || (targets!.msaa != nil) != Renderer.shared.antialias {
-            targets = Renderer.shared.makeTargets(width: w, height: h)
+        let r = Renderer.shared
+        let spec = SIMD4(w, h, Int(sceneScale * 1000), (r.antialias ? 1 : 0) | (r.tileMemory ? 2 : 0))
+        if targets == nil || spec != targetsSpec {
+            targets = r.makeTargets(width: w, height: h, scale: sceneScale)
+            targetsSpec = spec
         }
         Renderer.shared.encode(cmd, params: current, time: current.time(elapsed: now - start), fade: fade,
                                targets: targets!, target: drawable.texture, pointSize: bounds.size)

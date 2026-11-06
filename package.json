@@ -3,14 +3,14 @@
   "version": "0.1.0",
   "description": "Hueflow website (the Mac app is in native/)",
   "scripts": {
-    "build": "esbuild site/src/hero.jsx --bundle --minify --define:process.env.NODE_ENV=\\\"production\\\" --outfile=site/hero.js"
+    "build": "node site/build.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.2"
   },
   "dependencies": {
     "@react-three/fiber": "^8.17.10",
-    "@shadergradient/react": "^2.4.20",
+    "@shadergradient/react": "2.4.20",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "three": "^0.169.0"

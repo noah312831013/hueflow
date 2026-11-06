@@ -21,4 +21,7 @@ assert(GradientParams([:]).colorPattern == 0 && GradientParams(["shapePattern": 
 
 assert(presets.count == 10 && presets[0].name == "Halo")
 assert(Renderer.shared.snapshot(presets[0].props, width: 64, height: 40) != nil, "Metal renders offscreen")
+let half = Renderer.shared.makeTargets(width: 101, height: 40, scale: 0.5)
+assert(half.scene.width == 51 && half.scene.height == 20 && half.depth.width == 51, "half-res scene targets")
+assert(half.scene.storageMode == .private, "the scene is read by the grain pass, so never memoryless")
 print("all tests passed")

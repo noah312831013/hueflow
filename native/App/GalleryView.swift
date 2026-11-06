@@ -88,15 +88,8 @@ enum Thumbs {
     private static var cache: [String: NSImage] = [:]
     static func image(_ props: Props) -> NSImage? {
         if let i = cache[props.key] { return i }
-        // Card is 224×140 pt. The grain's 2 pt dot grid aliases into moiré when resampled, so render 3× the card's
-        // Retina pixels with the live preview's grain scale and filter down to 2×.
-        let pt = CGSize(width: 224, height: 140), w = 448, h = 280
-        guard let big = Renderer.shared.snapshot(props, width: w * 3, height: h * 3, elapsed: 3.5, pointSize: pt),
-              let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                  bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue) else { return nil }
-        ctx.interpolationQuality = .high
-        ctx.draw(big, in: CGRect(x: 0, y: 0, width: w, height: h))
-        guard let cg = ctx.makeImage() else { return nil }
+        let pt = CGSize(width: 224, height: 140) // card size
+        guard let cg = Renderer.shared.thumbnail(props, pointSize: pt) else { return nil }
         let i = NSImage(cgImage: cg, size: pt)
         cache[props.key] = i
         return i
