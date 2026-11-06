@@ -14,8 +14,9 @@ struct Uniforms {
   float4 c1, c2, c3;
   float4 a;      // time, speed, density, strength
   float4 b;      // frequency, amplitude, brightness, reflection
-  float4 c;      // type (0 plane, 1 waterPlane, 2 sphere), env light, env preset
+  float4 c;      // type (0 plane, 1 waterPlane, 2 sphere), env light, env preset, color pattern scale
   float4 camPos;
+  float4 d;      // shape pattern, shape sharpness, color pattern (0 = position gradient), color sharpness
 };
 
 // GLSL mix() extrapolates outside [0,1] and the gradient formulas rely on it; Metal's mix() doesn't promise to.
@@ -76,6 +77,41 @@ float pnoise(float3 P, float3 rep) {
   return perlin(Pi0, gmod(Pi0 + 1.0, rep), fract(P));
 }
 
+// ---- Patterns: 0 noise (Perlin), 1 warp, 2 cells (smooth Voronoi), 3 ridged, 4 waves. All return about [-1, 1]. ----
+float3 hash3(float3 p) {
+  p = float3(dot(p, float3(127.1, 311.7, 74.7)), dot(p, float3(269.5, 183.3, 246.1)), dot(p, float3(113.5, 271.9, 124.6)));
+  return fract(sin(p) * 43758.5453);
+}
+// Noise that bends its own input: liquid marble.
+float warpNoise(float3 p) {
+  float3 q = float3(cnoise(p), cnoise(p + float3(5.2, 1.3, 2.8)), cnoise(p + float3(1.7, 9.2, 4.1)));
+  return cnoise(p + 1.5 * q);
+}
+// Smooth minimum distance to jittered cell points; higher k = crisper cell borders.
+float cells(float3 p, float k) {
+  float3 i = floor(p), f = fract(p);
+  float sum = 0.0;
+  for (int z = -1; z <= 1; z++) for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+    float3 g = float3(x, y, z);
+    sum += exp(-k * length(g + hash3(i + g) - f));
+  }
+  return 1.0 - 2.0 * saturate(-log(sum) / k + 0.25); // cell centers high, borders low
+}
+float ridged(float3 p) {
+  float s = 0.0, a = 0.5;
+  for (int i = 0; i < 3; i++) { float n = 1.0 - abs(cnoise(p)); s += n * n * a; p *= 2.0; a *= 0.5; }
+  return s / 0.875 * 2.0 - 1.0;
+}
+float waves(float3 p) {
+  return (sin(p.x * 2.0 + p.y * 0.7) + sin(p.y * 2.3 - p.z * 1.1 + 1.3) + sin(length(p.xz) * 3.0)) / 3.0;
+}
+// sharpness 0.5 leaves the pattern as is; lower softens, higher crisps.
+float pattern(int kind, float3 p, float sharp) {
+  float v = kind == 1 ? warpNoise(p) : kind == 2 ? cells(p, lerp(3.0, 24.0, sharp)) : kind == 3 ? ridged(p) : kind == 4 ? waves(p) : cnoise(p);
+  if (kind == 2 || abs(sharp - 0.5) < 1e-3) return v; // cells take sharpness as border crispness
+  return sign(v) * pow(abs(v), exp2((0.5 - sharp) * 3.0));
+}
+
 struct Vertex { packed_float3 pos; packed_float3 normal; packed_float2 uv; };
 struct VOut { float4 position [[position]]; float3 vPos; float3 world; };
 
@@ -84,11 +120,14 @@ vertex VOut sceneVertex(uint vid [[vertex_id]], const device Vertex* verts [[buf
   float2 uv = verts[vid].uv;
   float t = u.a.x * u.a.y;
   float3 pos;
+  int kind = int(u.d.x);
   if (u.c.x < 1.5) {
-    float distortion = 0.75 * cnoise(0.43 * position * u.a.z + t);
+    float distortion = 0.75 * pattern(kind, 0.43 * position * u.a.z + t, u.d.y);
     pos = position + normal * distortion * u.a.w;
   } else {
-    float distortion = pnoise((normal + t) * u.a.z, float3(10.0)) * u.a.w;
+    // pnoise keeps ShaderGradient's look for the default; other patterns are seamless on the sphere anyway.
+    float distortion = (kind == 0 && abs(u.d.y - 0.5) < 1e-3 ? pnoise((normal + t) * u.a.z, float3(10.0))
+                                                                  : pattern(kind, (normal + t) * u.a.z, u.d.y)) * u.a.w;
     float angle = sin(uv.y * u.b.x + t) * u.b.y;
     float s = sin(angle), c = cos(angle);
     pos = float3x3(float3(c, 0, -s), float3(0, 1, 0), float3(s, 0, c)) * (position + normal * distortion);
@@ -114,6 +153,12 @@ fragment float4 sceneFragment(VOut in [[stage_in]], constant Uniforms& u [[buffe
   float3 d = u.c.x < 1.5
     ? lerp(lerp(c1, c2, smoothstep(-3.0, 3.0, in.vPos.x)), c3, in.vPos.z)
     : lerp(c3, lerp(c2, c1, smoothstep(-1.0, 1.0, in.vPos.y)), length(in.vPos));
+  if (u.d.z > 0.5) {
+    // Color pattern: a three-stop ramp c1 -> c2 -> c3 over the pattern, drifting slower than the shape.
+    float3 pp = (u.c.x < 1.5 ? in.vPos * 0.6 : in.vPos * 1.5) * u.c.w + u.a.x * u.a.y * 0.5;
+    float f = saturate(pattern(int(u.d.z) - 1, pp, u.d.w) * 0.8 + 0.5); // noise rarely nears ±1: stretch to use all three colors
+    d = lerp(lerp(c1, c2, smoothstep(0.0, 0.5, f)), c3, smoothstep(0.5, 1.0, f));
+  }
   // MeshPhysicalMaterial (metalness 0.2) under an ambient light of brightness*PI: Lambert gives 0.8 * brightness.
   if (u.c.y < 0.5) return float4(d * 0.8 * u.b.z, 1.0);
   float3 n = normalize(cross(dfdx(in.world), dfdy(in.world)));
@@ -213,6 +258,7 @@ struct Uniforms {
     var c1 = SIMD4<Float>(), c2 = SIMD4<Float>(), c3 = SIMD4<Float>()
     var a = SIMD4<Float>(), b = SIMD4<Float>(), c = SIMD4<Float>()
     var camPos = SIMD4<Float>()
+    var d = SIMD4<Float>()
 }
 
 /// Numeric form of the props, so changes can ease in like the web version's camera transitions.
@@ -222,6 +268,8 @@ struct GradientParams {
     var c1 = SIMD3<Float>(), c2 = SIMD3<Float>(), c3 = SIMD3<Float>()
     var brightness: Float = 1.2, reflection: Float = 0.1
     var subdivision = 0
+    var shapePattern = 0, colorPattern = 0 // colorPattern 0 = position gradient, else pattern + 1
+    var shapeSharpness: Float = 0.5, colorSharpness: Float = 0.5, colorScale: Float = 1
     var grainAmount: Float = 1, grainSize: Float = 2
     var azimuth: Float = 180, polar: Float = 90, distance: Float = 3.6, zoom: Float = 1, fov: Float = 45
     var position = SIMD3<Float>(), rotation = SIMD3<Float>()
@@ -240,6 +288,10 @@ struct GradientParams {
         c1 = hexColor(p.str("color1", "#ff5005")); c2 = hexColor(p.str("color2", "#dbba95")); c3 = hexColor(p.str("color3", "#d0bce1"))
         brightness = f("brightness", 1.2); reflection = f("reflection", 0.1)
         subdivision = Int(max(0, min(2, p.num("subdivision", 0)).rounded()))
+        shapePattern = patternKinds[p.str("shapePattern", "noise")] ?? 0
+        colorPattern = patternKinds[p.str("colorPattern", "position")].map { $0 + 1 } ?? 0
+        shapeSharpness = max(0, min(1, f("shapeSharpness", 0.5))); colorSharpness = max(0, min(1, f("colorSharpness", 0.5)))
+        colorScale = max(0.1, min(5, f("colorScale", 1)))
         // Hueflow extras; the defaults are ShaderGradient's fixed halftone.
         grainAmount = max(0, min(1, f("grainAmount", 1))); grainSize = max(1, min(8, f("grainSize", 2)))
         azimuth = f("cAzimuthAngle", 180); polar = f("cPolarAngle", 90); distance = f("cDistance", 3.6); zoom = f("cameraZoom", 1)
@@ -260,6 +312,8 @@ struct GradientParams {
             n.frequency = l(frequency, t.frequency); n.amplitude = l(amplitude, t.amplitude)
             n.c1 = l3(c1, t.c1); n.c2 = l3(c2, t.c2); n.c3 = l3(c3, t.c3)
             n.brightness = l(brightness, t.brightness); n.reflection = l(reflection, t.reflection)
+            n.shapeSharpness = l(shapeSharpness, t.shapeSharpness); n.colorSharpness = l(colorSharpness, t.colorSharpness)
+            n.colorScale = l(colorScale, t.colorScale)
             n.grainAmount = l(grainAmount, t.grainAmount); n.grainSize = l(grainSize, t.grainSize)
             n.azimuth = l(azimuth, t.azimuth); n.polar = l(polar, t.polar); n.distance = l(distance, t.distance)
             n.zoom = l(zoom, t.zoom); n.fov = l(fov, t.fov)
@@ -275,6 +329,9 @@ struct GradientParams {
         return Float(elapsed)
     }
 }
+
+/// Pattern prop values, in the shader's order.
+let patternKinds = ["noise": 0, "warp": 1, "cells": 2, "ridged": 3, "waves": 4]
 
 /// ShaderGradient feeds hex/255 straight into the shader and writes the result without color management.
 func hexColor(_ s: String) -> SIMD3<Float> {
@@ -379,7 +436,8 @@ final class Renderer {
         u.c1 = SIMD4(p.c1, 1); u.c2 = SIMD4(p.c2, 1); u.c3 = SIMD4(p.c3, 1)
         u.a = [time, p.speed, p.density, p.strength]
         u.b = [p.frequency, p.amplitude, p.brightness, p.reflection]
-        u.c = [Float(p.type), p.env ? 1 : 0, Float(p.envPreset), 0]
+        u.c = [Float(p.type), p.env ? 1 : 0, Float(p.envPreset), p.colorScale]
+        u.d = [Float(p.shapePattern), p.shapeSharpness, Float(p.colorPattern), p.colorSharpness]
         u.camPos = SIMD4(eye, 1)
         return u
     }

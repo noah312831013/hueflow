@@ -23,6 +23,8 @@ struct ControlSpec: Identifiable {
 
 private let isSphere: (Props) -> Bool = { $0.str("type", "plane") == "sphere" }
 private let isEnv: (Props) -> Bool = { $0.str("lightType", "3d") == "env" }
+private let hasColorPattern: (Props) -> Bool = { $0.str("colorPattern", "position") != "position" }
+let patternNames: KeyValuePairs<String, String> = ["noise": "Noise", "warp": "Warp", "cells": "Cells", "ridged": "Ridged", "waves": "Waves"]
 private let hasGrain: (Props) -> Bool = { $0.str("grain", "on") == "on" }
 
 /// Editor controls, grouped by tab, with their ranges.
@@ -35,12 +37,17 @@ let tabs: [(String, [ControlSpec])] = [
         ControlSpec(key: "uDensity", label: "Density", kind: .range(0, 7, 0.1)),
         ControlSpec(key: "uFrequency", label: "Frequency", kind: .range(0, 10, 0.1), show: isSphere),
         ControlSpec(key: "uAmplitude", label: "Spiral", kind: .range(0, 10, 0.1), show: isSphere),
+        ControlSpec(key: "shapePattern", label: "Pattern", kind: .options(patternNames)),
+        ControlSpec(key: "shapeSharpness", label: "Sharpness", kind: .range(0, 1, 0.05), fallback: 0.5),
         ControlSpec(key: "subdivision", label: "Subdivision", kind: .range(0, 2, 1)),
     ]),
     ("Colors", [
         ControlSpec(key: "color1", label: "Color 1", kind: .color),
         ControlSpec(key: "color2", label: "Color 2", kind: .color),
         ControlSpec(key: "color3", label: "Color 3", kind: .color),
+        ControlSpec(key: "colorPattern", label: "Pattern", kind: .options(["position": "Gradient", "noise": "Noise", "warp": "Warp", "cells": "Cells", "ridged": "Ridged", "waves": "Waves"])),
+        ControlSpec(key: "colorScale", label: "Scale", kind: .range(0.1, 5, 0.1), show: hasColorPattern, fallback: 1),
+        ControlSpec(key: "colorSharpness", label: "Sharpness", kind: .range(0, 1, 0.05), show: hasColorPattern, fallback: 0.5),
     ]),
     ("Effects", [
         ControlSpec(key: "grain", label: "Grain", kind: .options(onOff)),
@@ -343,10 +350,12 @@ struct ControlRow: View {
             switch spec.kind {
             case .options(let opts):
                 Text(spec.label).font(.system(size: 12, weight: .medium)).foregroundStyle(.white.opacity(0.75))
-                Picker(spec.label, selection: Binding(get: { props.str(spec.key, opts.first!.key) }, set: { props[spec.key] = .str($0) })) {
+                let picker = Picker(spec.label, selection: Binding(get: { props.str(spec.key, opts.first!.key) }, set: { props[spec.key] = .str($0) })) {
                     ForEach(opts, id: \.key) { Text($0.value).tag($0.key) }
                 }
-                .pickerStyle(.segmented).labelsHidden()
+                .labelsHidden()
+                // More than 4 segments overflow the editor panel.
+                if opts.count > 4 { picker.pickerStyle(.menu) } else { picker.pickerStyle(.segmented) }
             case .range(let lo, let hi, let step):
                 let value = Binding(get: { min(hi, max(lo, props.num(spec.key, spec.fallback ?? lo))) },
                                     set: { props[spec.key] = .num(($0 / step).rounded() * step) })

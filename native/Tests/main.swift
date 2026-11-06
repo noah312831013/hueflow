@@ -15,6 +15,10 @@ assert(r.time(elapsed: 7) == 7, "range wraps into [start, end)")
 r.approach(GradientParams(["brightness": .num(2)]), 0.5)
 assert(abs(r.brightness - 1.6) < 1e-5, "eases toward target")
 
+let pat = GradientParams(["shapePattern": .str("cells"), "colorPattern": .str("noise"), "colorScale": .num(99)])
+assert(pat.shapePattern == 2 && pat.colorPattern == 1 && pat.colorScale == 5, "patterns parse; color 0 is the position gradient")
+assert(GradientParams([:]).colorPattern == 0 && GradientParams(["shapePattern": .str("bogus")]).shapePattern == 0)
+
 assert(presets.count == 10 && presets[0].name == "Halo")
 assert(Renderer.shared.snapshot(presets[0].props, width: 64, height: 40) != nil, "Metal renders offscreen")
 print("all tests passed")
