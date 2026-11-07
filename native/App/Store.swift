@@ -23,10 +23,11 @@ struct Config: Codable {
     var paused = false
     var pauseOnBattery = true
     var pauseInFullScreen = true
-    var antialias = false
+    var antialias = true
     // Performance (Performance submenu); each saves GPU with little or no visible change.
     var lowerFrameRate = true    // wallpapers at 30 fps instead of 60
     var halfResolution = true    // wallpapers' 3D scene at half size, grain at full size
+    var retina = false           // wallpapers' grain at the Retina scale: smooth silhouettes, ~3× GPU time
     var pauseWhenCovered = true  // pause a wallpaper while other windows hide it
     var tileMemory = true        // depth/MSAA buffers in GPU tile memory
     var saveEnergy = true        // 15 fps in Low Power Mode or when the Mac runs hot
@@ -45,9 +46,10 @@ struct Config: Codable {
         pauseOnBattery = try c.decodeIfPresent(Bool.self, forKey: .pauseOnBattery) ?? true
         pauseInFullScreen = try c.decodeIfPresent(Bool.self, forKey: .pauseInFullScreen) ?? true
         hideDockIcon = try c.decodeIfPresent(Bool.self, forKey: .hideDockIcon) ?? false
-        antialias = try c.decodeIfPresent(Bool.self, forKey: .antialias) ?? false
+        antialias = try c.decodeIfPresent(Bool.self, forKey: .antialias) ?? true
         lowerFrameRate = try c.decodeIfPresent(Bool.self, forKey: .lowerFrameRate) ?? true
         halfResolution = try c.decodeIfPresent(Bool.self, forKey: .halfResolution) ?? true
+        retina = try c.decodeIfPresent(Bool.self, forKey: .retina) ?? false
         pauseWhenCovered = try c.decodeIfPresent(Bool.self, forKey: .pauseWhenCovered) ?? true
         tileMemory = try c.decodeIfPresent(Bool.self, forKey: .tileMemory) ?? true
         saveEnergy = try c.decodeIfPresent(Bool.self, forKey: .saveEnergy) ?? true
@@ -298,8 +300,11 @@ final class Store: ObservableObject {
             let hidden = cfg.pauseWhenCovered && !w.occlusionState.contains(.visible)
             let paused = all || hidden || fullScreen.contains(w.screen?.displayID ?? 0)
             if v.isPaused != paused { v.isPaused = paused }
-            if v.preferredFramesPerSecond != fps { v.preferredFramesPerSecond = fps }
+            // Beats need 60 fps to look smooth, so music-reactive wallpapers skip the 30 fps option (not the 15 fps saver).
+            let f = fps == 30 && v.props.str("music", "off") == "on" ? 60 : fps
+            if v.preferredFramesPerSecond != f { v.preferredFramesPerSecond = f }
             v.sceneScale = cfg.halfResolution ? 0.5 : 1
+            v.retina = cfg.retina
         }
     }
 
@@ -467,6 +472,7 @@ final class Store: ObservableObject {
         }
         submenu("Quality & Performance") { sub in
             item("Antialiasing", checked: cfg.antialias, in: sub) { [weak self] in self?.setAntialias(!(self?.cfg.antialias ?? false)) }
+            toggles([("Retina Resolution (Smoother Edges)", \.retina)], in: sub)
             sub.addItem(.separator())
             toggles([("30 fps Wallpaper", \.lowerFrameRate), ("Half-Resolution 3D", \.halfResolution),
                      ("Tile Memory Buffers", \.tileMemory), ("Slow Down in Low Power Mode or When Hot", \.saveEnergy)], in: sub)

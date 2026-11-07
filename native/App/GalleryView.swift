@@ -28,6 +28,8 @@ private let isEnv: (Props) -> Bool = { $0.str("lightType", "3d") == "env" }
 private let hasColorPattern: (Props) -> Bool = { $0.str("colorPattern", "position") != "position" }
 let patternNames: KeyValuePairs<String, String> = ["noise": "Noise", "warp": "Warp", "cells": "Cells", "ridged": "Ridged", "waves": "Waves"]
 private let hasGrain: (Props) -> Bool = { $0.str("grain", "on") == "on" }
+private let hasMusic: (Props) -> Bool = { $0.str("music", "off") == "on" }
+private let hasBokeh: (Props) -> Bool = { $0.str("bokeh", "off") == "on" }
 
 /// Editor controls, grouped by tab, with their ranges.
 let tabs: [(String, [ControlSpec])] = [
@@ -36,6 +38,8 @@ let tabs: [(String, [ControlSpec])] = [
         ControlSpec(key: "shapePattern", label: "Pattern", kind: .options(patternNames)),
         ControlSpec(key: "uSpeed", label: "Speed", kind: .range(0, 2, 0.1)),
         ControlSpec(key: "uStrength", label: "Strength", kind: .range(0, 10, 0.1)),
+        ControlSpec(key: "music", label: "Move to Music", kind: .options(["off": "Off", "on": "On"])),
+        ControlSpec(key: "musicIntensity", label: "Beat Intensity", kind: .range(0, 3, 0.1), show: hasMusic, fallback: 1),
         ControlSpec(key: "uDensity", label: "Density", kind: .range(0, 7, 0.1)),
         ControlSpec(key: "animate", label: "Animate", kind: .options(onOff), advanced: true),
         ControlSpec(key: "shapeSharpness", label: "Sharpness", kind: .range(0, 1, 0.05), fallback: 0.5, advanced: true),
@@ -59,6 +63,9 @@ let tabs: [(String, [ControlSpec])] = [
         ControlSpec(key: "brightness", label: "Brightness", kind: .range(0.1, 3, 0.1), show: { !isEnv($0) }),
         ControlSpec(key: "envPreset", label: "Environment", kind: .options(["city": "City", "dawn": "Dawn", "lobby": "Lobby"]), show: isEnv),
         ControlSpec(key: "reflection", label: "Reflection", kind: .range(0, 1, 0.1), show: isEnv, advanced: true),
+        ControlSpec(key: "bokeh", label: "Bokeh", kind: .options(["off": "Off", "on": "On"])),
+        ControlSpec(key: "focus", label: "Focus", kind: .range(-10, 10, 0.1), show: hasBokeh, fallback: 0),
+        ControlSpec(key: "blur", label: "Blur", kind: .range(0, 1, 0.05), show: hasBokeh, fallback: 0.5),
     ]),
     ("Camera", [
         ControlSpec(key: "cAzimuthAngle", label: "Azimuth", kind: .range(0, 360, 1)),

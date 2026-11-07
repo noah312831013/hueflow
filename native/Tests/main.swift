@@ -37,4 +37,22 @@ assert(Renderer.shared.snapshot(presets[0].props, width: 64, height: 40) != nil,
 let half = Renderer.shared.makeTargets(width: 101, height: 40, scale: 0.5)
 assert(half.scene.width == 51 && half.scene.height == 20 && half.depth.width == 51, "half-res scene targets")
 assert(half.scene.storageMode == .private, "the scene is read by the grain pass, so never memoryless")
+let far = presets[0].props.merging(["cDistance": .num(14), "animate": .str("off")]) { $1 }
+func pixels(_ p: Props) -> Data { Renderer.shared.snapshot(p, width: 96, height: 60)!.dataProvider!.data! as Data }
+assert(pixels(far) == pixels(far.merging(["bokeh": .str("on"), "blur": .num(0)]) { $1 }), "bokeh with no blur is a no-op")
+assert(pixels(far) != pixels(far.merging(["bokeh": .str("on"), "blur": .num(1)]) { $1 }), "bokeh blurs")
+assert(GradientParams(["blur": .num(5), "focus": .num(-99)]).blur == 1 && GradientParams(["focus": .num(-99)]).focus == -10, "bokeh clamps")
+// Beat envelope: a 60 Hz tone pulsing on and off twice a second rises on the pulses and falls between them.
+var beat = BeatEnvelope(), highs: [Float] = [], lows: [Float] = []
+for block in 0..<200 { // 200 × 10 ms at 48 kHz
+    let on = (block / 25) % 2 == 0
+    let samples = (0..<480).map { i -> Float in on ? 0.5 * sin(2 * .pi * 60 * Float(block * 480 + i) / 48000) : 0 }
+    samples.withUnsafeBufferPointer { beat.feed($0, channels: 1, sampleRate: 48000) }
+    if block >= 100 { (block % 25 == 24 ? (on ? { highs.append(beat.level) } : { lows.append(beat.level) }) : {})() }
+}
+assert(highs.allSatisfy { $0 > 0.7 } && lows.allSatisfy { $0 < 0.2 }, "beat envelope follows the pulses: \(highs) \(lows)")
+var hiss = BeatEnvelope()
+let noise = (0..<48000).map { _ in Float.random(in: -0.001...0.001) }
+noise.withUnsafeBufferPointer { hiss.feed($0, channels: 2, sampleRate: 48000) }
+assert(hiss.level < 0.01, "near-silence stays still")
 print("all tests passed")

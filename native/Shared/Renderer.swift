@@ -148,7 +148,9 @@ float3 envColor(float3 d, int preset) {
   return lerp(float3(0.35, 0.34, 0.33), float3(1.15, 1.12, 1.1), h);
 }
 
+// Alpha carries the depth for bokeh: distance from the camera minus its distance to the target (0 = target plane).
 fragment float4 sceneFragment(VOut in [[stage_in]], constant Uniforms& u [[buffer(1)]]) {
+  float z = length(u.camPos.xyz - in.world) - u.camPos.w;
   float3 c1 = u.c1.rgb, c2 = u.c2.rgb, c3 = u.c3.rgb;
   float3 d = u.c.x < 1.5
     ? lerp(lerp(c1, c2, smoothstep(-3.0, 3.0, in.vPos.x)), c3, in.vPos.z)
@@ -160,7 +162,7 @@ fragment float4 sceneFragment(VOut in [[stage_in]], constant Uniforms& u [[buffe
     d = lerp(lerp(c1, c2, smoothstep(0.0, 0.5, f)), c3, smoothstep(0.5, 1.0, f));
   }
   // MeshPhysicalMaterial (metalness 0.2) under an ambient light of brightness*PI: Lambert gives 0.8 * brightness.
-  if (u.c.y < 0.5) return float4(d * 0.8 * u.b.z, 1.0);
+  if (u.c.y < 0.5) return float4(d * 0.8 * u.b.z, z);
   float3 n = normalize(cross(dfdx(in.world), dfdy(in.world)));
   float3 v = normalize(u.camPos.xyz - in.world);
   if (dot(n, v) < 0.0) n = -n;
@@ -169,7 +171,7 @@ fragment float4 sceneFragment(VOut in [[stage_in]], constant Uniforms& u [[buffe
   float3 f0 = lerp(float3(0.04), d, 0.2);
   float fres = pow(1.0 - saturate(dot(n, v)), 5.0);
   float3 spec = (f0 + (max(float3(1.0 - rough), f0) - f0) * fres) * lerp(envColor(reflect(-v, n), preset), envColor(n, preset), rough);
-  return float4(d * 0.8 * envColor(n, preset) + spec, 1.0);
+  return float4(d * 0.8 * envColor(n, preset) + spec, z);
 }
 
 // ---- three.js HalftonePass as configured by ShaderGradient's grain: dots, radius 2, scatter 1, linear blending ----
@@ -234,6 +236,29 @@ float dotColour(texture2d<float> tex, float2 size, Cell c, float2 p, int ch, flo
   return clamp(res, 0.0, 1.0);
 }
 
+// Bokeh: a gather blur of the scene whose radius grows with the distance from the focus plane. A tap only counts if
+// its own blur reaches this pixel, and taps behind this pixel can't spread wider than it does, so a sharp object
+// doesn't take on the blurred background. p.x = focus (depth units), p.y = largest radius (scene pixels).
+float cocOf(float z, float4 p) { return min(abs(z - p.x) * 0.5, 1.0) * p.y; }
+
+fragment float4 bokehFragment(QOut in [[stage_in]], texture2d<float> tex [[texture(0)]], constant float4& p [[buffer(0)]]) {
+  constexpr sampler s(filter::linear, address::clamp_to_edge);
+  float2 size = float2(tex.get_width(), tex.get_height()), uv = float2(in.uv.x, 1.0 - in.uv.y);
+  float4 c = tex.sample(s, uv);
+  float coc = cocOf(c.a, p);
+  float3 sum = c.rgb;
+  float wsum = 1.0;
+  for (int i = 0; i < 16; i++) {
+    float r = sqrt((float(i) + 0.5) / 16.0) * p.y, a = float(i) * 2.39996; // golden-angle disk
+    float4 t = tex.sample(s, uv + r * float2(cos(a), sin(a)) / size);
+    float tc = cocOf(t.a, p);
+    if (t.a > c.a) tc = min(tc, coc);
+    float w = saturate(tc - r + 1.0);
+    sum += t.rgb * w; wsum += w;
+  }
+  return float4(sum / wsum, c.a);
+}
+
 // params[0]: width, height (points), grain amount (0 = off, 1 = dots only, as ShaderGradient), fade (0 = black)
 // params[1]: grain dot radius (ShaderGradient uses 2)
 fragment float4 finalFragment(QOut in [[stage_in]], texture2d<float> tex [[texture(0)]], constant float4* params [[buffer(0)]]) {
@@ -271,6 +296,8 @@ struct GradientParams {
     var shapePattern = 0, colorPattern = 0 // colorPattern 0 = position gradient, else pattern + 1
     var shapeSharpness: Float = 0.5, colorSharpness: Float = 0.5, colorScale: Float = 1
     var grainAmount: Float = 1, grainSize: Float = 2
+    var bokeh = false, focus: Float = 0, blur: Float = 0.5
+    var music = false, musicIntensity: Float = 1
     var azimuth: Float = 180, polar: Float = 90, distance: Float = 3.6, zoom: Float = 1, fov: Float = 45
     var position = SIMD3<Float>(), rotation = SIMD3<Float>()
     var pixelDensity: Float = 1
@@ -294,6 +321,8 @@ struct GradientParams {
         colorScale = max(0.1, min(5, f("colorScale", 1)))
         // Hueflow extras; the defaults are ShaderGradient's fixed halftone.
         grainAmount = max(0, min(1, f("grainAmount", 1))); grainSize = max(1, min(8, f("grainSize", 2)))
+        music = p.str("music", "off") == "on"; musicIntensity = max(0, min(3, f("musicIntensity", 1)))
+        bokeh = p.str("bokeh", "off") == "on"; focus = max(-10, min(10, f("focus", 0))); blur = max(0, min(1, f("blur", 0.5)))
         azimuth = f("cAzimuthAngle", 180); polar = f("cPolarAngle", 90); distance = f("cDistance", 3.6); zoom = f("cameraZoom", 1)
         fov = f("fov", 45)
         position = [f("positionX", 0), f("positionY", 0), f("positionZ", 0)]
@@ -315,6 +344,7 @@ struct GradientParams {
             n.shapeSharpness = l(shapeSharpness, t.shapeSharpness); n.colorSharpness = l(colorSharpness, t.colorSharpness)
             n.colorScale = l(colorScale, t.colorScale)
             n.grainAmount = l(grainAmount, t.grainAmount); n.grainSize = l(grainSize, t.grainSize)
+            n.focus = l(focus, t.focus); n.blur = l(blur, t.blur); n.musicIntensity = l(musicIntensity, t.musicIntensity)
             n.azimuth = l(azimuth, t.azimuth); n.polar = l(polar, t.polar); n.distance = l(distance, t.distance)
             n.zoom = l(zoom, t.zoom); n.fov = l(fov, t.fov)
             n.position = l3(position, t.position); n.rotation = l3(rotation, t.rotation)
@@ -367,6 +397,7 @@ final class Renderer {
     var tileMemory = true
     private lazy var memorylessOK = device.supportsFamily(.apple1)
     private let finalPipeline: MTLRenderPipelineState
+    private let bokehPipeline: MTLRenderPipelineState
     private let depthState: MTLDepthStencilState
     private var meshes: [SIMD2<Int>: (vertices: MTLBuffer, indices: MTLBuffer, count: Int)] = [:]
     static let outputFormat = MTLPixelFormat.bgra8Unorm
@@ -391,6 +422,9 @@ final class Renderer {
         q.fragmentFunction = lib.makeFunction(name: "finalFragment")
         q.colorAttachments[0].pixelFormat = Renderer.outputFormat
         finalPipeline = try! device.makeRenderPipelineState(descriptor: q)
+        q.fragmentFunction = lib.makeFunction(name: "bokehFragment")
+        q.colorAttachments[0].pixelFormat = .rgba16Float
+        bokehPipeline = try! device.makeRenderPipelineState(descriptor: q)
         let ds = MTLDepthStencilDescriptor()
         ds.depthCompareFunction = .less
         ds.isDepthWriteEnabled = true
@@ -442,7 +476,7 @@ final class Renderer {
         u.b = [p.frequency, p.amplitude, p.brightness, p.reflection]
         u.c = [Float(p.type), p.env ? 1 : 0, Float(p.envPreset), p.colorScale]
         u.d = [Float(p.shapePattern), p.shapeSharpness, Float(p.colorPattern), p.colorSharpness]
-        u.camPos = SIMD4(eye, 1)
+        u.camPos = SIMD4(eye, simd_length(eye - p.position))
         return u
     }
 
@@ -454,7 +488,7 @@ final class Renderer {
         s.colorAttachments[0].texture = t.msaa ?? scene
         s.colorAttachments[0].resolveTexture = t.msaa == nil ? nil : scene
         s.colorAttachments[0].loadAction = .clear
-        s.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        s.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1000) // alpha = depth: far
         s.colorAttachments[0].storeAction = t.msaa == nil ? .store : .multisampleResolve
         s.depthAttachment.texture = t.depth
         s.depthAttachment.loadAction = .clear
@@ -472,6 +506,23 @@ final class Renderer {
         e.drawIndexedPrimitives(type: .triangle, indexCount: m.count, indexType: .uint32, indexBuffer: m.indices, indexBufferOffset: 0)
         e.endEncoding()
 
+        var source = scene
+        if p.bokeh && p.blur > 0 {
+            let b = MTLRenderPassDescriptor()
+            b.colorAttachments[0].texture = t.blur
+            b.colorAttachments[0].loadAction = .dontCare
+            b.colorAttachments[0].storeAction = .store
+            // Largest radius scales with the scene height, so it looks the same at any resolution or scene scale.
+            var bp = SIMD4<Float>(p.focus, p.blur * 0.06 * Float(scene.height), 0, 0)
+            let be = cmd.makeRenderCommandEncoder(descriptor: b)!
+            be.setRenderPipelineState(bokehPipeline)
+            be.setFragmentTexture(scene, index: 0)
+            be.setFragmentBytes(&bp, length: 16, index: 0)
+            be.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            be.endEncoding()
+            source = t.blur
+        }
+
         let f = MTLRenderPassDescriptor()
         f.colorAttachments[0].texture = target
         f.colorAttachments[0].loadAction = .dontCare
@@ -479,14 +530,15 @@ final class Renderer {
         var fp = [SIMD4<Float>(Float(pointSize.width), Float(pointSize.height), p.grain ? p.grainAmount : 0, fade), SIMD4<Float>(p.grainSize, 0, 0, 0)]
         let q = cmd.makeRenderCommandEncoder(descriptor: f)!
         q.setRenderPipelineState(finalPipeline)
-        q.setFragmentTexture(scene, index: 0)
+        q.setFragmentTexture(source, index: 0)
         q.setFragmentBytes(&fp, length: 32, index: 0)
         q.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         q.endEncoding()
     }
 
-    /// `msaa` is the multisampled color target resolved into `scene`; nil when antialiasing is off.
-    typealias Targets = (scene: MTLTexture, depth: MTLTexture, msaa: MTLTexture?)
+    /// `msaa` is the multisampled color target resolved into `scene`; nil when antialiasing is off. `blur` holds the
+    /// bokeh pass output.
+    typealias Targets = (scene: MTLTexture, depth: MTLTexture, msaa: MTLTexture?, blur: MTLTexture)
 
     /// The scene pass resolution for a `width`×`height` output: `scale` < 1 renders the 3D scene smaller and the final
     /// pass scales it up (the gradient is smooth, so it barely shows); grain is always drawn at the full size.
@@ -506,7 +558,8 @@ final class Renderer {
             return device.makeTexture(descriptor: t)!
         }
         return (tex(.rgba16Float, [.renderTarget, .shaderRead], samples: 1), tex(.depth32Float, .renderTarget, samples: n, storage: transient),
-                n > 1 ? tex(.rgba16Float, .renderTarget, samples: n, storage: transient) : nil)
+                n > 1 ? tex(.rgba16Float, .renderTarget, samples: n, storage: transient) : nil,
+                tex(.rgba16Float, [.renderTarget, .shaderRead], samples: 1))
     }
 
     /// A still sized `pointSize` × `scale` pixels, with grain at the live views' scale. The grain's 2 pt dot grid aliases
@@ -560,8 +613,14 @@ class GradientView: MTKView, MTKViewDelegate {
     private var last = CACurrentMediaTime()
     private var targets: Renderer.Targets?
     private var targetsSpec = SIMD4<Int>() // drawable w, h, scene scale ‰, msaa | tile memory: rebuild targets when any changes
-    /// Scene pass resolution relative to the drawable (see Renderer.sceneSize).
+    /// Scene pass resolution relative to the 1× drawable (see Renderer.sceneSize).
     var sceneScale: Float = 1
+    /// Draw the grain pass at the screen's Retina scale (scene size unchanged): silhouettes against black lose their
+    /// 2 px stair steps, at about 3× the GPU time.
+    /// The beat level (0–1) music-reactive gradients follow; the app sets it to its system audio tap.
+    static var audioLevel: () -> Float = { 0 }
+    var retina = false { didSet { if retina != oldValue { updateDrawableSize() } } }
+    private var backing: CGFloat { retina ? (window?.backingScaleFactor ?? 2) : 1 }
 
     init(props: Props = [:]) {
         super.init(frame: .zero, device: Renderer.shared.device)
@@ -585,9 +644,11 @@ class GradientView: MTKView, MTKViewDelegate {
 
     override func setFrameSize(_ newSize: NSSize) { super.setFrameSize(newSize); updateDrawableSize() }
 
-    /// Like the canvas' dpr = pixelDensity: render at points × pixelDensity, ignoring the Retina scale.
+    override func viewDidChangeBackingProperties() { super.viewDidChangeBackingProperties(); updateDrawableSize() }
+
+    /// Like the canvas' dpr = pixelDensity: render at points × pixelDensity, ignoring the Retina scale unless `retina`.
     private func updateDrawableSize() {
-        let d = CGFloat(target.pixelDensity)
+        let d = CGFloat(target.pixelDensity) * backing
         let s = CGSize(width: max(1, (bounds.width * d).rounded()), height: max(1, (bounds.height * d).rounded()))
         if drawableSize != s { drawableSize = s }
     }
@@ -601,12 +662,16 @@ class GradientView: MTKView, MTKViewDelegate {
         guard let drawable = currentDrawable, let cmd = Renderer.shared.queue.makeCommandBuffer() else { return }
         let w = drawable.texture.width, h = drawable.texture.height
         let r = Renderer.shared
-        let spec = SIMD4(w, h, Int(sceneScale * 1000), (r.antialias ? 1 : 0) | (r.tileMemory ? 2 : 0))
+        let scale = sceneScale / Float(backing)
+        let spec = SIMD4(w, h, Int(scale * 1000), (r.antialias ? 1 : 0) | (r.tileMemory ? 2 : 0))
         if targets == nil || spec != targetsSpec {
-            targets = r.makeTargets(width: w, height: h, scale: sceneScale)
+            targets = r.makeTargets(width: w, height: h, scale: scale)
             targetsSpec = spec
         }
-        Renderer.shared.encode(cmd, params: current, time: current.time(elapsed: now - start), fade: fade,
+        var p = current
+        // Read every frame, past the easing in `approach`, which would smear the beats.
+        if p.music { p.strength *= 1 + p.musicIntensity * GradientView.audioLevel() }
+        Renderer.shared.encode(cmd, params: p, time: current.time(elapsed: now - start), fade: fade,
                                targets: targets!, target: drawable.texture, pointSize: bounds.size)
         cmd.present(drawable)
         cmd.commit()

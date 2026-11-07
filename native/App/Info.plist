@@ -13,6 +13,7 @@
 	<key>CFBundleShortVersionString</key><string>1.0.1</string>
 	<key>CFBundleVersion</key><string>101</string>
 	<key>LSMinimumSystemVersion</key><string>14.0</string>
+	<key>NSAudioCaptureUsageDescription</key><string>Hueflow listens to what your Mac is playing so music-reactive gradients can move to the beat. Audio is analysed on your Mac and never recorded or sent anywhere.</string>
 	<key>NSHighResolutionCapable</key><true/>
 	<key>NSPrincipalClass</key><string>NSApplication</string>
 </dict>

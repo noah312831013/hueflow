@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var gallery: NSWindow?
 
     func applicationDidFinishLaunching(_ n: Notification) {
+        GradientView.audioLevel = { AudioTap.shared.level() }
         NSApp.mainMenu = mainMenu()
         store.onShowGallery = { [weak self] in self?.showGallery() }
         store.isUnlocked = { [weak self] in self?.license.isUnlocked ?? false }
