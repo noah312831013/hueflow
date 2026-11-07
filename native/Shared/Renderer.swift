@@ -297,7 +297,7 @@ struct GradientParams {
     var shapeSharpness: Float = 0.5, colorSharpness: Float = 0.5, colorScale: Float = 1
     var grainAmount: Float = 1, grainSize: Float = 2
     var bokeh = false, focus: Float = 0, blur: Float = 0.5
-    var music = false, musicIntensity: Float = 1
+    var music = false, musicColor = false, musicIntensity: Float = 1
     var azimuth: Float = 180, polar: Float = 90, distance: Float = 3.6, zoom: Float = 1, fov: Float = 45
     var position = SIMD3<Float>(), rotation = SIMD3<Float>()
     var pixelDensity: Float = 1
@@ -321,7 +321,7 @@ struct GradientParams {
         colorScale = max(0.1, min(5, f("colorScale", 1)))
         // Hueflow extras; the defaults are ShaderGradient's fixed halftone.
         grainAmount = max(0, min(1, f("grainAmount", 1))); grainSize = max(1, min(8, f("grainSize", 2)))
-        music = p.str("music", "off") == "on"; musicIntensity = max(0, min(3, f("musicIntensity", 1)))
+        music = p.str("music", "off") == "on"; musicColor = p.str("musicTarget", "strength") == "color"; musicIntensity = max(0, min(3, f("musicIntensity", 1)))
         bokeh = p.str("bokeh", "off") == "on"; focus = max(-10, min(10, f("focus", 0))); blur = max(0, min(1, f("blur", 0.5)))
         azimuth = f("cAzimuthAngle", 180); polar = f("cPolarAngle", 90); distance = f("cDistance", 3.6); zoom = f("cameraZoom", 1)
         fov = f("fov", 45)
@@ -350,6 +350,14 @@ struct GradientParams {
             n.position = l3(position, t.position); n.rotation = l3(rotation, t.rotation)
         }
         self = n
+    }
+
+    /// Music reactivity for a beat `level` (0–1): Strength swells, or Color slides each color toward the next
+    /// (1 → 2 → 3 → 1), up to a full step at the top intensity.
+    mutating func react(to level: Float) {
+        guard musicColor else { strength *= 1 + musicIntensity * level; return }
+        let k = min(1, musicIntensity * level / 3)
+        (c1, c2, c3) = (c1 + (c2 - c1) * k, c2 + (c3 - c2) * k, c3 + (c1 - c3) * k)
     }
 
     /// uTime the shader sees after `elapsed` seconds of playback, as the library's clock computes it.
@@ -670,7 +678,7 @@ class GradientView: MTKView, MTKViewDelegate {
         }
         var p = current
         // Read every frame, past the easing in `approach`, which would smear the beats.
-        if p.music { p.strength *= 1 + p.musicIntensity * GradientView.audioLevel() }
+        if p.music { p.react(to: GradientView.audioLevel()) }
         Renderer.shared.encode(cmd, params: p, time: current.time(elapsed: now - start), fade: fade,
                                targets: targets!, target: drawable.texture, pointSize: bounds.size)
         cmd.present(drawable)

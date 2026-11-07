@@ -72,6 +72,8 @@ final class Store: ObservableObject {
     @Published var toast: String?
     private var desktops: [NSWindow] = []
     private var savers: [NSWindow] = []
+    /// The macOS screen saver is up (hot corner, its own idle timer or the installed Hueflow.saver).
+    private var systemSaverRunning = false
     private var saverStartedAt = Date.distantPast
     private var statusItem: NSStatusItem?
     var onShowGallery: () -> Void = {}
@@ -109,6 +111,16 @@ final class Store: ObservableObject {
         }
         DistributedNotificationCenter.default().addObserver(forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.stopSaver() }
+        }
+        // The macOS saver wins: ours steps aside instead of rendering underneath it, and doesn't start while it runs.
+        for (name, running) in [("com.apple.screensaver.didstart", true), ("com.apple.screensaver.didstop", false)] {
+            DistributedNotificationCenter.default().addObserver(forName: .init(name), object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.systemSaverRunning = running
+                    if running { self?.stopSaver() }
+                    self?.applyPause()
+                }
+            }
         }
         Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.poll() } }
     }
@@ -292,7 +304,7 @@ final class Store: ObservableObject {
 
     /// Wallpapers are hidden behind the screen saver and full-screen windows, so they pause then.
     private func applyPause() {
-        let all = cfg.paused || !savers.isEmpty || (cfg.pauseOnBattery && onBattery)
+        let all = cfg.paused || !savers.isEmpty || systemSaverRunning || (cfg.pauseOnBattery && onBattery)
         let fullScreen = cfg.pauseInFullScreen && !all ? fullScreenDisplays : []
         let fps = wallpaperFPS
         for w in desktops {
@@ -371,7 +383,7 @@ final class Store: ObservableObject {
         if !savers.isEmpty {
             // Any input dismisses it; the grace period ignores the click that started it.
             if idle < 1 && Date().timeIntervalSince(saverStartedAt) > 2.5 { stopSaver() }
-        } else if cfg.saver.enabled && idle >= Double(cfg.saver.minutes * 60) && !screenLocked {
+        } else if cfg.saver.enabled && idle >= Double(cfg.saver.minutes * 60) && !screenLocked && !systemSaverRunning {
             startSaver()
         }
         applyPause() // picks up battery and full-screen changes

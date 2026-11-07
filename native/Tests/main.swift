@@ -55,4 +55,12 @@ var hiss = BeatEnvelope()
 let noise = (0..<48000).map { _ in Float.random(in: -0.001...0.001) }
 noise.withUnsafeBufferPointer { hiss.feed($0, channels: 2, sampleRate: 48000) }
 assert(hiss.level < 0.01, "near-silence stays still")
+var shift = GradientParams(["music": .str("on"), "musicTarget": .str("color"), "musicIntensity": .num(3),
+                             "color1": .str("#ff0000"), "color2": .str("#00ff00"), "color3": .str("#0000ff")])
+let s0 = shift.strength
+shift.react(to: 1)
+assert(shift.strength == s0 && shift.c1 == GradientParams(["color1": .str("#00ff00")]).c1, "color mode cycles colors, not strength")
+var swell = GradientParams(["music": .str("on"), "musicIntensity": .num(1)])
+swell.react(to: 1)
+assert(swell.strength == GradientParams([:]).strength * 2, "strength mode doubles at a full beat")
 print("all tests passed")

@@ -39,6 +39,7 @@ let tabs: [(String, [ControlSpec])] = [
         ControlSpec(key: "uSpeed", label: "Speed", kind: .range(0, 2, 0.1)),
         ControlSpec(key: "uStrength", label: "Strength", kind: .range(0, 10, 0.1)),
         ControlSpec(key: "music", label: "Move to Music", kind: .options(["off": "Off", "on": "On"])),
+        ControlSpec(key: "musicTarget", label: "Moves", kind: .options(["strength": "Strength", "color": "Color"]), show: hasMusic),
         ControlSpec(key: "musicIntensity", label: "Beat Intensity", kind: .range(0, 3, 0.1), show: hasMusic, fallback: 1),
         ControlSpec(key: "uDensity", label: "Density", kind: .range(0, 7, 0.1)),
         ControlSpec(key: "animate", label: "Animate", kind: .options(onOff), advanced: true),

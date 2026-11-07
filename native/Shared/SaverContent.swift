@@ -32,7 +32,9 @@ final class SaverContent: NSView {
         let first = o.props ?? presets[0].props
         var rest = (presets.map(\.props) + o.extra).filter { $0.key != first.key }
         rest.shuffle()
-        list = [first] + rest
+        // Shuffled gradients keep the starting one's music reactivity, or it would stop at the first shuffle.
+        let music = first.filter { ["music", "musicTarget", "musicIntensity"].contains($0.key) }
+        list = [first] + rest.map { $0.merging(music) { $1 } }
         gradient = GradientView(props: first)
         gradient.fade = 0
         super.init(frame: .zero)
