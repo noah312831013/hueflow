@@ -549,7 +549,7 @@ final class Renderer {
 }
 
 /// A live gradient. Set `props` any time; continuous values ease over ~0.4s.
-final class GradientView: MTKView, MTKViewDelegate {
+class GradientView: MTKView, MTKViewDelegate {
     var props: Props = [:] { didSet { propsChanged() } }
     /// 0 = black, 1 = visible; the saver fades through black between gradients.
     var fade: Float = 1

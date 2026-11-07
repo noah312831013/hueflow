@@ -72,6 +72,10 @@
   .ctl input[type=range] { width: 100%; accent-color: #fff; }
   .ctl select { font: inherit; color: #fff; background: rgba(255,255,255,.08); border: 0; border-radius: 10px; padding: 7px 10px; }
   .ctl input[type=color] { width: 44px; height: 28px; padding: 0; border: 1px solid rgba(255,255,255,.2); border-radius: 8px; background: none; cursor: pointer; }
+  .editor .adv { align-self: flex-start; font-size: 12px; font-weight: 600; color: #a1a1a6; background: none; padding: 4px 0 0; }
+  .editor .adv::after { content: "›"; display: inline-block; margin-left: 6px; transition: transform .25s var(--ease); }
+  .editor .adv.open::after { transform: rotate(90deg); }
+  .editor .adv:hover { color: #fff; }
   .editor .reset { align-self: flex-start; font-size: 13px; color: #a1a1a6; background: none; padding: 0; }
   .editor .reset:hover { color: #fff; }
   @media (max-width: 860px) { .editor { grid-template-columns: 1fr; } }

@@ -20,7 +20,7 @@ function Hero() {
   );
 }
 
-// Same keys, labels and ranges as the app's editor (native/App/GalleryView.swift). Pattern keys go to
+// Same keys, labels, ranges and Advanced split as the app's editor (native/App/GalleryView.swift). Pattern keys go to
 // src/patterns.js's uniforms instead of ShaderGradient.
 const patternKeys = ['shapePattern', 'shapeSharpness', 'colorPattern', 'colorScale', 'colorSharpness'];
 const patternNames = [['noise', 'Noise'], ['warp', 'Warp'], ['cells', 'Cells'], ['ridged', 'Ridged'], ['waves', 'Waves']];
@@ -31,28 +31,28 @@ const onOff = [['on', 'On'], ['off', 'Off']];
 const tabs = {
   Shape: [
     { key: 'type', label: 'Type', options: [['plane', 'Plane'], ['waterPlane', 'Water'], ['sphere', 'Sphere']] },
+    { key: 'shapePattern', label: 'Pattern', options: patternNames, fallback: 'noise' },
     { key: 'uSpeed', label: 'Speed', range: [0, 2, 0.1] },
     { key: 'uStrength', label: 'Strength', range: [0, 10, 0.1] },
     { key: 'uDensity', label: 'Density', range: [0, 7, 0.1] },
-    { key: 'uFrequency', label: 'Frequency', range: [0, 10, 0.1], show: isSphere },
-    { key: 'uAmplitude', label: 'Spiral', range: [0, 10, 0.1], show: isSphere },
-    { key: 'shapePattern', label: 'Pattern', options: patternNames, fallback: 'noise' },
-    { key: 'shapeSharpness', label: 'Sharpness', range: [0, 1, 0.05], fallback: 0.5 },
+    { key: 'shapeSharpness', label: 'Sharpness', range: [0, 1, 0.05], fallback: 0.5, advanced: true },
+    { key: 'uFrequency', label: 'Frequency', range: [0, 10, 0.1], show: isSphere, advanced: true },
+    { key: 'uAmplitude', label: 'Spiral', range: [0, 10, 0.1], show: isSphere, advanced: true },
   ],
   Colors: [
     { key: 'color1', label: 'Color 1', color: true },
     { key: 'color2', label: 'Color 2', color: true },
     { key: 'color3', label: 'Color 3', color: true },
     { key: 'colorPattern', label: 'Pattern', options: [['position', 'Gradient'], ...patternNames], fallback: 'position' },
-    { key: 'colorScale', label: 'Scale', range: [0.1, 5, 0.1], show: hasColorPattern, fallback: 1 },
-    { key: 'colorSharpness', label: 'Sharpness', range: [0, 1, 0.05], show: hasColorPattern, fallback: 0.5 },
+    { key: 'colorScale', label: 'Scale', range: [0.1, 5, 0.1], show: hasColorPattern, fallback: 1, advanced: true },
+    { key: 'colorSharpness', label: 'Sharpness', range: [0, 1, 0.05], show: hasColorPattern, fallback: 0.5, advanced: true },
   ],
   Effects: [
     { key: 'grain', label: 'Grain', options: onOff },
     { key: 'lightType', label: 'Lighting', options: [['3d', 'Lights'], ['env', 'Environment']] },
     { key: 'brightness', label: 'Brightness', range: [0.1, 3, 0.1], show: (p) => !isEnv(p) },
     { key: 'envPreset', label: 'Environment', options: [['city', 'City'], ['dawn', 'Dawn'], ['lobby', 'Lobby']], show: isEnv },
-    { key: 'reflection', label: 'Reflection', range: [0, 1, 0.1], show: isEnv },
+    { key: 'reflection', label: 'Reflection', range: [0, 1, 0.1], show: isEnv, advanced: true },
   ],
   Camera: [
     { key: 'cAzimuthAngle', label: 'Azimuth', range: [0, 360, 1] },
@@ -109,9 +109,12 @@ function Editor() {
   const [preset, setPreset] = useState('Halo');
   const [props, setProps] = useState(byName.Halo);
   const [tab, setTab] = useState('Shape');
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const set = (key, value) => setProps((p) => ({ ...p, [key]: value }));
   const pick = (name) => { setPreset(name); setProps(byName[name]); };
   useEffect(() => setPatternProps(props), [props]);
+  const visible = tabs[tab].filter((s) => !s.show || s.show(props));
+  const advanced = visible.filter((s) => s.advanced);
   const gradientProps = Object.fromEntries(Object.entries(props).filter(([k]) => !patternKeys.includes(k)));
   return (
     <>
@@ -132,7 +135,11 @@ function Editor() {
           ))}
         </div>
         <div className="ctls">
-          {tabs[tab].filter((s) => !s.show || s.show(props)).map((s) => <Control key={s.key} spec={s} props={props} set={set} />)}
+          {visible.filter((s) => !s.advanced).map((s) => <Control key={s.key} spec={s} props={props} set={set} />)}
+          {advanced.length > 0 && (
+            <button className={'adv' + (showAdvanced ? ' open' : '')} aria-expanded={showAdvanced} onClick={() => setShowAdvanced(!showAdvanced)}>Advanced</button>
+          )}
+          {showAdvanced && advanced.map((s) => <Control key={s.key} spec={s} props={props} set={set} />)}
         </div>
         <button className="reset" onClick={() => pick(preset)}>Reset {preset}</button>
       </div>

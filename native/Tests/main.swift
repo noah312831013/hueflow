@@ -19,6 +19,19 @@ let pat = GradientParams(["shapePattern": .str("cells"), "colorPattern": .str("n
 assert(pat.shapePattern == 2 && pat.colorPattern == 1 && pat.colorScale == 5, "patterns parse; color 0 is the position gradient")
 assert(GradientParams([:]).colorPattern == 0 && GradientParams(["shapePattern": .str("bogus")]).shapePattern == 0)
 
+let cam: Props = ["type": .str("plane"), "cAzimuthAngle": .num(10), "cPolarAngle": .num(178), "cDistance": .num(4)]
+assert(cam.camera(.orbit(dx: 50, dy: -10))["cAzimuthAngle"] == .num(350), "azimuth wraps into 0..<360")
+assert(cam.camera(.orbit(dx: 0, dy: -10))["cPolarAngle"] == .num(180), "polar clamps at 180")
+assert(cam.camera(.zoom(2))["cDistance"] == .num(2), "planes zoom by moving the camera closer")
+let sph: Props = ["type": .str("sphere"), "cameraZoom": .num(10), "cAzimuthAngle": .num(180)]
+assert(sph.camera(.zoom(2))["cameraZoom"] == .num(20), "spheres zoom the lens")
+assert(sph.camera(.roll(30))["rotationZ"] == .num(-30), "roll follows the fingers when seen from behind")
+
+let back: Props = ["type": .str("plane"), "cAzimuthAngle": .num(180), "cPolarAngle": .num(90), "cDistance": .num(3.6)]
+let panned = back.camera(.pan(dx: 100, dy: 0, viewHeight: 800))
+assert(panned.num("positionX", 0) < 0 && abs(panned.num("positionY", 0)) < 1e-9, "seen from -z, screen-right is world -x")
+assert(back.camera(.pan(dx: 0, dy: 100, viewHeight: 800)).num("positionY", 0) < 0, "dragging down moves the model down")
+
 assert(presets.count == 10 && presets[0].name == "Halo")
 assert(Renderer.shared.snapshot(presets[0].props, width: 64, height: 40) != nil, "Metal renders offscreen")
 let half = Renderer.shared.makeTargets(width: 101, height: 40, scale: 0.5)

@@ -18,6 +18,8 @@ struct ControlSpec: Identifiable {
     var show: (Props) -> Bool = { _ in true }
     /// Slider value when the prop is missing, if not the range's low end (must match the renderer's default).
     var fallback: Double? = nil
+    /// Shown only under the tab's "Advanced" disclosure.
+    var advanced = false
     var id: String { key }
 }
 
@@ -31,44 +33,44 @@ private let hasGrain: (Props) -> Bool = { $0.str("grain", "on") == "on" }
 let tabs: [(String, [ControlSpec])] = [
     ("Shape", [
         ControlSpec(key: "type", label: "Type", kind: .options(typeNames)),
-        ControlSpec(key: "animate", label: "Animate", kind: .options(onOff)),
+        ControlSpec(key: "shapePattern", label: "Pattern", kind: .options(patternNames)),
         ControlSpec(key: "uSpeed", label: "Speed", kind: .range(0, 2, 0.1)),
         ControlSpec(key: "uStrength", label: "Strength", kind: .range(0, 10, 0.1)),
         ControlSpec(key: "uDensity", label: "Density", kind: .range(0, 7, 0.1)),
-        ControlSpec(key: "uFrequency", label: "Frequency", kind: .range(0, 10, 0.1), show: isSphere),
-        ControlSpec(key: "uAmplitude", label: "Spiral", kind: .range(0, 10, 0.1), show: isSphere),
-        ControlSpec(key: "shapePattern", label: "Pattern", kind: .options(patternNames)),
-        ControlSpec(key: "shapeSharpness", label: "Sharpness", kind: .range(0, 1, 0.05), fallback: 0.5),
-        ControlSpec(key: "subdivision", label: "Subdivision", kind: .range(0, 2, 1)),
+        ControlSpec(key: "animate", label: "Animate", kind: .options(onOff), advanced: true),
+        ControlSpec(key: "shapeSharpness", label: "Sharpness", kind: .range(0, 1, 0.05), fallback: 0.5, advanced: true),
+        ControlSpec(key: "subdivision", label: "Subdivision", kind: .range(0, 2, 1), advanced: true),
+        ControlSpec(key: "uFrequency", label: "Frequency", kind: .range(0, 10, 0.1), show: isSphere, advanced: true),
+        ControlSpec(key: "uAmplitude", label: "Spiral", kind: .range(0, 10, 0.1), show: isSphere, advanced: true),
     ]),
     ("Colors", [
         ControlSpec(key: "color1", label: "Color 1", kind: .color),
         ControlSpec(key: "color2", label: "Color 2", kind: .color),
         ControlSpec(key: "color3", label: "Color 3", kind: .color),
         ControlSpec(key: "colorPattern", label: "Pattern", kind: .options(["position": "Gradient", "noise": "Noise", "warp": "Warp", "cells": "Cells", "ridged": "Ridged", "waves": "Waves"])),
-        ControlSpec(key: "colorScale", label: "Scale", kind: .range(0.1, 5, 0.1), show: hasColorPattern, fallback: 1),
-        ControlSpec(key: "colorSharpness", label: "Sharpness", kind: .range(0, 1, 0.05), show: hasColorPattern, fallback: 0.5),
+        ControlSpec(key: "colorScale", label: "Scale", kind: .range(0.1, 5, 0.1), show: hasColorPattern, fallback: 1, advanced: true),
+        ControlSpec(key: "colorSharpness", label: "Sharpness", kind: .range(0, 1, 0.05), show: hasColorPattern, fallback: 0.5, advanced: true),
     ]),
     ("Effects", [
         ControlSpec(key: "grain", label: "Grain", kind: .options(onOff)),
-        ControlSpec(key: "grainAmount", label: "Grain Amount", kind: .range(0, 1, 0.05), show: hasGrain, fallback: 1),
-        ControlSpec(key: "grainSize", label: "Grain Size", kind: .range(1, 8, 0.5), show: hasGrain, fallback: 2),
+        ControlSpec(key: "grainAmount", label: "Grain Amount", kind: .range(0, 1, 0.05), show: hasGrain, fallback: 1, advanced: true),
+        ControlSpec(key: "grainSize", label: "Grain Size", kind: .range(1, 8, 0.5), show: hasGrain, fallback: 2, advanced: true),
         ControlSpec(key: "lightType", label: "Lighting", kind: .options(["3d": "Lights", "env": "Environment"])),
         ControlSpec(key: "brightness", label: "Brightness", kind: .range(0.1, 3, 0.1), show: { !isEnv($0) }),
         ControlSpec(key: "envPreset", label: "Environment", kind: .options(["city": "City", "dawn": "Dawn", "lobby": "Lobby"]), show: isEnv),
-        ControlSpec(key: "reflection", label: "Reflection", kind: .range(0, 1, 0.1), show: isEnv),
+        ControlSpec(key: "reflection", label: "Reflection", kind: .range(0, 1, 0.1), show: isEnv, advanced: true),
     ]),
     ("Camera", [
         ControlSpec(key: "cAzimuthAngle", label: "Azimuth", kind: .range(0, 360, 1)),
         ControlSpec(key: "cPolarAngle", label: "Polar", kind: .range(0, 180, 1)),
         ControlSpec(key: "cDistance", label: "Distance", kind: .range(0, 20, 0.1)),
         ControlSpec(key: "cameraZoom", label: "Zoom", kind: .range(0.1, 30, 0.1)),
-        ControlSpec(key: "positionX", label: "Position X", kind: .range(-5, 5, 0.1)),
-        ControlSpec(key: "positionY", label: "Position Y", kind: .range(-5, 5, 0.1)),
-        ControlSpec(key: "positionZ", label: "Position Z", kind: .range(-5, 5, 0.1)),
-        ControlSpec(key: "rotationX", label: "Rotation X", kind: .range(-360, 360, 1)),
-        ControlSpec(key: "rotationY", label: "Rotation Y", kind: .range(-360, 360, 1)),
-        ControlSpec(key: "rotationZ", label: "Rotation Z", kind: .range(-360, 360, 1)),
+        ControlSpec(key: "positionX", label: "Position X", kind: .range(-5, 5, 0.1), advanced: true),
+        ControlSpec(key: "positionY", label: "Position Y", kind: .range(-5, 5, 0.1), advanced: true),
+        ControlSpec(key: "positionZ", label: "Position Z", kind: .range(-5, 5, 0.1), advanced: true),
+        ControlSpec(key: "rotationX", label: "Rotation X", kind: .range(-360, 360, 1), advanced: true),
+        ControlSpec(key: "rotationY", label: "Rotation Y", kind: .range(-360, 360, 1), advanced: true),
+        ControlSpec(key: "rotationZ", label: "Rotation Z", kind: .range(-360, 360, 1), advanced: true),
     ]),
 ]
 
@@ -78,8 +80,37 @@ let tvSpring = Animation.spring(response: 0.45, dampingFraction: 0.82)
 
 struct LiveGradient: NSViewRepresentable {
     let props: Props
-    func makeNSView(context: Context) -> GradientView { GradientView(props: props) }
-    func updateNSView(_ v: GradientView, context: Context) { if v.props != props { v.props = props } }
+    /// While editing: trackpad/mouse gestures on the preview move the camera through this (nil = view only).
+    var onCamera: ((CameraGesture) -> Void)? = nil
+    var onCameraReset: (() -> Void)? = nil
+    func makeNSView(context: Context) -> CameraGradientView { CameraGradientView(props: props) }
+    func updateNSView(_ v: CameraGradientView, context: Context) {
+        if v.props != props { v.props = props }
+        v.onCamera = onCamera
+        v.onReset = onCameraReset
+    }
+}
+
+/// Preview that turns trackpad and mouse input into camera gestures: two-finger swipe or drag orbits (with ⇧ or ⌥, or
+/// right-drag: pans), pinch zooms, two-finger rotate rolls, double-click resets.
+final class CameraGradientView: GradientView {
+    var onCamera: ((CameraGesture) -> Void)?
+    var onReset: (() -> Void)?
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { onCamera != nil }
+    override func scrollWheel(with e: NSEvent) {
+        guard let onCamera, e.hasPreciseScrollingDeltas else { return super.scrollWheel(with: e) } // mouse wheels: no orbit
+        move(e, dx: e.scrollingDeltaX, dy: e.scrollingDeltaY)
+    }
+    override func mouseDragged(with e: NSEvent) { move(e, dx: e.deltaX, dy: e.deltaY) }
+    override func rightMouseDragged(with e: NSEvent) { onCamera?(.pan(dx: e.deltaX, dy: e.deltaY, viewHeight: bounds.height)) }
+    private func move(_ e: NSEvent, dx: Double, dy: Double) {
+        // ⌥ as well as ⇧: macOS may turn ⇧-scrolling into horizontal scrolling.
+        let pan = !e.modifierFlags.intersection([.shift, .option]).isEmpty
+        onCamera?(pan ? .pan(dx: dx, dy: dy, viewHeight: bounds.height) : .orbit(dx: dx, dy: dy))
+    }
+    override func magnify(with e: NSEvent) { onCamera?(.zoom(1 + e.magnification)) }
+    override func rotate(with e: NSEvent) { onCamera?(.roll(Double(e.rotation))) }
+    override func mouseUp(with e: NSEvent) { if e.clickCount == 2 { onReset?() } }
 }
 
 /// Real renders of gradients for the cards, made on demand and kept in memory.
@@ -109,7 +140,9 @@ struct GalleryRoot: View {
 
     var body: some View {
         ZStack {
-            LiveGradient(props: editing == nil ? focused.props : draft)
+            LiveGradient(props: editing == nil ? focused.props : draft,
+                         onCamera: editing == nil ? nil : { draft = draft.camera($0) },
+                         onCameraReset: editing.map { e in { for k in cameraKeys { draft[k] = e.props[k] } } })
                 .ignoresSafeArea()
             if let e = editing {
                 EditorView(store: store, entry: e, props: $draft, onClose: close, onSaved: { editing = $0 })
@@ -272,6 +305,7 @@ struct EditorView: View {
     let onClose: () -> Void
     let onSaved: (Entry) -> Void
     @State private var tab = "Shape"
+    @State private var showAdvanced = false
     @State private var name = ""
     @State private var target: UInt32 = 0 // 0 = all displays
 
@@ -291,8 +325,22 @@ struct EditorView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        ForEach(tabs.first { $0.0 == tab }!.1.filter { $0.show(props) }) { c in
-                            ControlRow(spec: c, props: $props)
+                        let visible = tabs.first { $0.0 == tab }!.1.filter { $0.show(props) }
+                        ForEach(visible.filter { !$0.advanced }) { c in ControlRow(spec: c, props: $props) }
+                        let advanced = visible.filter(\.advanced)
+                        if !advanced.isEmpty {
+                            Button { withAnimation(tvSpring) { showAdvanced.toggle() } } label: {
+                                HStack(spacing: 6) {
+                                    Text("Advanced")
+                                    Image(systemName: "chevron.right").rotationEffect(.degrees(showAdvanced ? 90 : 0))
+                                    Spacer()
+                                }
+                                .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.6))
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.top, 4)
+                            if showAdvanced { ForEach(advanced) { c in ControlRow(spec: c, props: $props) } }
                         }
                     }
                     .padding(.vertical, 4)
