@@ -113,29 +113,53 @@ float pattern(int kind, float3 p, float sharp) {
 }
 
 struct Vertex { packed_float3 pos; packed_float3 normal; packed_float2 uv; };
-struct VOut { float4 position [[position]]; float3 vPos; float3 world; };
+struct VOut { float4 position [[position]]; float3 vPos; float3 world; float3 normal; float3 rest; };
 
-vertex VOut sceneVertex(uint vid [[vertex_id]], const device Vertex* verts [[buffer(0)]], constant Uniforms& u [[buffer(1)]]) {
-  float3 position = verts[vid].pos, normal = verts[vid].normal;
-  float2 uv = verts[vid].uv;
+float3 displace(float3 position, float3 normal, float2 uv, constant Uniforms& u) {
   float t = u.a.x * u.a.y;
-  float3 pos;
   int kind = int(u.d.x);
   if (u.c.x < 1.5) {
     float distortion = 0.75 * pattern(kind, 0.43 * position * u.a.z + t, u.d.y);
-    pos = position + normal * distortion * u.a.w;
-  } else {
-    // pnoise keeps ShaderGradient's look for the default; other patterns are seamless on the sphere anyway.
-    float distortion = (kind == 0 && abs(u.d.y - 0.5) < 1e-3 ? pnoise((normal + t) * u.a.z, float3(10.0))
-                                                                  : pattern(kind, (normal + t) * u.a.z, u.d.y)) * u.a.w;
-    float angle = sin(uv.y * u.b.x + t) * u.b.y;
-    float s = sin(angle), c = cos(angle);
-    pos = float3x3(float3(c, 0, -s), float3(0, 1, 0), float3(s, 0, c)) * (position + normal * distortion);
+    return position + normal * distortion * u.a.w;
   }
+  // pnoise keeps ShaderGradient's look for the default; other patterns are seamless on the sphere anyway.
+  float distortion = (kind == 0 && abs(u.d.y - 0.5) < 1e-3 ? pnoise((normal + t) * u.a.z, float3(10.0))
+                                                                : pattern(kind, (normal + t) * u.a.z, u.d.y)) * u.a.w;
+  float angle = sin(uv.y * u.b.x + t) * u.b.y;
+  float s = sin(angle), c = cos(angle);
+  return float3x3(float3(c, 0, -s), float3(0, 1, 0), float3(s, 0, c)) * (position + normal * distortion);
+}
+
+// A unit-sphere point with the normal and uv.y (latitude) the sphere mesh gives it.
+float3 spherePoint(float3 q, constant Uniforms& u) {
+  q = normalize(q);
+  return displace(q, q, float2(0, 1.0 - acos(clamp(q.y, -1.0, 1.0)) / 3.14159265), u);
+}
+
+vertex VOut sceneVertex(uint vid [[vertex_id]], const device Vertex* verts [[buffer(0)]], constant Uniforms& u [[buffer(1)]]) {
+  float3 position = verts[vid].pos, normal = verts[vid].normal;
+  float3 pos = displace(position, normal, verts[vid].uv, u);
   VOut o;
   o.position = u.mvp * float4(pos, 1.0);
   o.vPos = pos;
   o.world = (u.model * float4(pos, 1.0)).xyz;
+  o.normal = float3(0, 0, 1);
+  o.rest = position;
+  if (u.c.y > 0.5 && u.c.x > 0.5) { // plane: per pixel in sceneFragment (its mesh is one column wide)
+    // Smooth normal of the displaced surface from two nearby displaced points; per-pixel dfdx/dfdy normals were flat per
+    // triangle, so environment reflections showed the mesh's facets.
+    float3 a, b;
+    if (u.c.x < 1.5) {
+      a = displace(position + float3(0.01, 0, 0), normal, verts[vid].uv, u);
+      b = displace(position + float3(0, 0.01, 0), normal, verts[vid].uv, u);
+    } else {
+      float3 tx = cross(float3(0, 1, 0), position);
+      tx = length(tx) < 1e-3 ? float3(1, 0, 0) : normalize(tx); // poles
+      a = spherePoint(position + tx * 0.002, u);
+      b = spherePoint(position + cross(position, tx) * 0.002, u);
+    }
+    o.normal = (u.model * float4(cross(a - pos, b - pos), 0.0)).xyz;
+  }
   return o;
 }
 
@@ -163,7 +187,13 @@ fragment float4 sceneFragment(VOut in [[stage_in]], constant Uniforms& u [[buffe
   }
   // MeshPhysicalMaterial (metalness 0.2) under an ambient light of brightness*PI: Lambert gives 0.8 * brightness.
   if (u.c.y < 0.5) return float4(d * 0.8 * u.b.z, z);
-  float3 n = normalize(cross(dfdx(in.world), dfdy(in.world)));
+  float3 n = in.normal;
+  if (u.c.x < 0.5) {
+    float3 p0 = displace(in.rest, float3(0, 0, 1), 0, u);
+    n = (u.model * float4(cross(displace(in.rest + float3(0.01, 0, 0), float3(0, 0, 1), 0, u) - p0,
+                                displace(in.rest + float3(0, 0.01, 0), float3(0, 0, 1), 0, u) - p0), 0.0)).xyz;
+  }
+  n = normalize(n);
   float3 v = normalize(u.camPos.xyz - in.world);
   if (dot(n, v) < 0.0) n = -n;
   int preset = int(u.c.z);
@@ -617,8 +647,9 @@ class GradientView: MTKView, MTKViewDelegate {
     private var first = true
     private var current = GradientParams([:])
     private var target = GradientParams([:])
-    private var start = CACurrentMediaTime()
+    private var elapsed = 0.0 // animation clock: advances only while drawing, so a resumed view continues where it paused
     private var last = CACurrentMediaTime()
+    private var rampIn = 1.0
     private var targets: Renderer.Targets?
     private var targetsSpec = SIMD4<Int>() // drawable w, h, scene scale ‰, msaa | tile memory: rebuild targets when any changes
     /// Scene pass resolution relative to the 1× drawable (see Renderer.sceneSize).
@@ -663,9 +694,24 @@ class GradientView: MTKView, MTKViewDelegate {
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) { targets = nil }
 
+    /// The animation time of the system-wallpaper still (Store.matchSystemWallpaper).
+    static let stillTime = 3.5
+    /// Jumps to the still's frame and draws it, e.g. right before pausing.
+    func showStill() {
+        current = target
+        elapsed = GradientView.stillTime
+        rampIn = 0
+        last = CACurrentMediaTime()
+        draw()
+    }
+
     func draw(in view: MTKView) {
         let now = CACurrentMediaTime()
-        current.approach(target, 1 - exp(-Float(now - last) * 8))
+        let dt = min(now - last, 0.1) // a long gap means we were paused: don't jump ahead
+        current.approach(target, 1 - exp(-Float(dt) * 8))
+        // After showStill, speed eases up from 0 over ~1.2 s, so the still comes alive instead of restarting.
+        rampIn = min(1, rampIn + dt / 1.2)
+        elapsed += dt * rampIn * rampIn * (3 - 2 * rampIn)
         last = now
         guard let drawable = currentDrawable, let cmd = Renderer.shared.queue.makeCommandBuffer() else { return }
         let w = drawable.texture.width, h = drawable.texture.height
@@ -679,7 +725,7 @@ class GradientView: MTKView, MTKViewDelegate {
         var p = current
         // Read every frame, past the easing in `approach`, which would smear the beats.
         if p.music { p.react(to: GradientView.audioLevel()) }
-        Renderer.shared.encode(cmd, params: p, time: current.time(elapsed: now - start), fade: fade,
+        Renderer.shared.encode(cmd, params: p, time: current.time(elapsed: elapsed), fade: fade,
                                targets: targets!, target: drawable.texture, pointSize: bounds.size)
         cmd.present(drawable)
         cmd.commit()

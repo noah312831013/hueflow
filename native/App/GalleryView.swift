@@ -105,6 +105,15 @@ final class CameraGradientView: GradientView {
     var onCamera: ((CameraGesture) -> Void)?
     var onReset: (() -> Void)?
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { onCamera != nil }
+    // The gallery window can sit closed-off on another Space, minimized or covered: don't render it then.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        NotificationCenter.default.removeObserver(self, name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+        guard let w = window else { return }
+        NotificationCenter.default.addObserver(self, selector: #selector(occlusionChanged), name: NSWindow.didChangeOcclusionStateNotification, object: w)
+        occlusionChanged()
+    }
+    @objc private func occlusionChanged() { isPaused = !(window?.occlusionState.contains(.visible) ?? false) }
     override func scrollWheel(with e: NSEvent) {
         guard let onCamera, e.hasPreciseScrollingDeltas else { return super.scrollWheel(with: e) } // mouse wheels: no orbit
         move(e, dx: e.scrollingDeltaX, dy: e.scrollingDeltaY)
@@ -249,10 +258,10 @@ struct Row: View {
             Text(title).font(.system(size: 17, weight: .semibold)).padding(.horizontal, 48)
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 22) {
+                    let current = store.cfg.default?.props
                     ForEach(entries, id: \.identity) { e in
-                        Card(entry: e, current: store.cfg.default?.props.key == e.props.key, focused: focused.identity == e.identity)
-                            .onHover { if $0 { focused = e } }
-                            .onTapGesture { open(e) }
+                        Card(entry: e, current: current == e.props, focused: focused.identity == e.identity)
+                            .onTapGesture { focused = e } // no double-click: SwiftUI would hold every single click until it times out
                             .contextMenu {
                                 Button("Set as Wallpaper") { store.apply(e); store.show("Set as wallpaper") }
                                 Button("Edit") { open(e) }
@@ -276,6 +285,8 @@ struct Card: View {
     let current: Bool
     let focused: Bool
     @State private var image: NSImage?
+    @State private var tilt: CGPoint? // cursor over the thumbnail, -1…1 per axis; nil when not hovered
+    private var lifted: Bool { focused || tilt != nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -289,18 +300,32 @@ struct Card: View {
                 // Apple TV focus sheen
                 .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(
                     LinearGradient(colors: [.white.opacity(focused ? 0.22 : 0), .clear], startPoint: .topLeading, endPoint: .center)))
+                // Apple TV parallax glare: follows the cursor
+                .overlay(RadialGradient(colors: [.white.opacity(tilt == nil ? 0 : 0.28), .clear],
+                                        center: UnitPoint(x: ((tilt?.x ?? 0) + 1) / 2, y: ((tilt?.y ?? 0) + 1) / 2), startRadius: 0, endRadius: 180)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous)).allowsHitTesting(false))
                 if current {
                     Image(systemName: "checkmark.circle.fill").font(.system(size: 18)).symbolRenderingMode(.palette)
                         .foregroundStyle(.white, .black.opacity(0.35)).padding(8)
                 }
             }
-            .shadow(color: .black.opacity(focused ? 0.5 : 0.25), radius: focused ? 22 : 8, y: focused ? 14 : 4)
-            Text(entry.name).font(.system(size: 13, weight: .medium)).foregroundStyle(.white.opacity(focused ? 1 : 0.65)).lineLimit(1)
+            // Shadow from a plain shape: shadowing the image itself re-renders it offscreen every animation frame.
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.black)
+                .shadow(color: .black.opacity(lifted ? 0.5 : 0.25), radius: lifted ? 22 : 8, y: lifted ? 14 : 4))
+            .rotation3DEffect(.degrees(tilt.map { hypot($0.x, $0.y) * 7 } ?? 0), axis: (x: -(tilt?.y ?? 0), y: tilt?.x ?? 0, z: 0), perspective: 0.6)
+            Text(entry.name).font(.system(size: 13, weight: .medium)).foregroundStyle(.white.opacity(lifted ? 1 : 0.65)).lineLimit(1)
         }
-        .scaleEffect(focused ? 1.1 : 1, anchor: .center)
-        .zIndex(focused ? 1 : 0)
+        .scaleEffect(focused ? 1.1 : tilt != nil ? 1.05 : 1, anchor: .center)
+        .zIndex(lifted ? 1 : 0)
         .animation(tvSpring, value: focused)
-        .task(id: entry.props.key) { image = Thumbs.image(entry.props) }
+        .animation(.spring(response: 0.3, dampingFraction: 0.75), value: tilt)
+        // Hover and clicks use the untransformed frame: tracking the tilted card made its edge slip out from under the
+        // cursor, flipping hover off and on every frame.
+        .contentShape(Rectangle())
+        .onContinuousHover { phase in
+            if case .active(let p) = phase { tilt = CGPoint(x: p.x / 112 - 1, y: min(1, p.y / 70 - 1)) } else { tilt = nil }
+        }
+        .task(id: entry.props) { image = Thumbs.image(entry.props) }
     }
 }
 

@@ -109,6 +109,15 @@ final class Store: ObservableObject {
         NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.applyPause() }
         }
+        // setDesktopImageURL only sets the current Space; others keep a since-deleted still and the lock screen falls back to Apple's default.
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.applyPause() // leaving a full-screen Space: resume now, not on the next 1 s poll
+                guard self.isUnlocked() else { return }
+                for s in NSScreen.screens where self.isEnabled(s.displayID) { self.matchSystemWallpaper(s, (self.entry(for: s.displayID) ?? presets[0]).props) }
+            }
+        }
         DistributedNotificationCenter.default().addObserver(forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.stopSaver() }
         }
@@ -286,7 +295,7 @@ final class Store: ObservableObject {
         guard NSWorkspace.shared.desktopImageURL(for: screen) != url else { return }
         if !fm.fileExists(atPath: url.path) {
             let scale = screen.backingScaleFactor
-            guard let img = Renderer.shared.snapshot(props, width: Int(screen.frame.width * scale), height: Int(screen.frame.height * scale), elapsed: 3.5),
+            guard let img = Renderer.shared.snapshot(props, width: Int(screen.frame.width * scale), height: Int(screen.frame.height * scale), elapsed: GradientView.stillTime),
                   let jpg = NSBitmapImageRep(cgImage: img).representation(using: .jpeg, properties: [.compressionFactor: 0.9]) else { return }
             try? jpg.write(to: url)
         }
@@ -310,8 +319,14 @@ final class Store: ObservableObject {
         for w in desktops {
             guard let v = w.contentView as? GradientView else { continue }
             let hidden = cfg.pauseWhenCovered && !w.occlusionState.contains(.visible)
-            let paused = all || hidden || fullScreen.contains(w.screen?.displayID ?? 0)
-            if v.isPaused != paused { v.isPaused = paused }
+            let unseen = hidden || fullScreen.contains(w.screen?.displayID ?? 0)
+            let paused = all || unseen
+            if v.isPaused != paused {
+                // macOS shows the still (system wallpaper) when leaving full screen, before our window: pause on its frame
+                // so the hand-back to motion is seamless.
+                if paused && unseen { v.showStill() } // a visible pause (menu, battery) must not jump
+                v.isPaused = paused
+            }
             // Beats need 60 fps to look smooth, so music-reactive wallpapers skip the 30 fps option (not the 15 fps saver).
             let f = fps == 30 && v.props.str("music", "off") == "on" ? 60 : fps
             if v.preferredFramesPerSecond != f { v.preferredFramesPerSecond = f }
