@@ -11,7 +11,7 @@ const byName = { Afterglow: afterglow, ...Object.fromEntries(Object.values(prese
 const canvasProps = { pixelDensity: 1, fov: 45, pointerEvents: 'none', envBasePath: 'assets/hdr/' };
 
 function Hero() {
-  const [props, setProps] = useState(byName.Universe);
+  const [props, setProps] = useState(byName.Afterglow);
   useEffect(() => {
     window.setHero = (name) => byName[name] && setProps(byName[name]);
   }, []);
@@ -109,8 +109,8 @@ function Control({ spec, props, set }) {
 }
 
 function Editor() {
-  const [preset, setPreset] = useState('Halo');
-  const [props, setProps] = useState(byName.Halo);
+  const [preset, setPreset] = useState('Afterglow');
+  const [props, setProps] = useState(byName.Afterglow);
   const [tab, setTab] = useState('Shape');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const set = (key, value) => setProps((p) => ({ ...p, [key]: value }));
