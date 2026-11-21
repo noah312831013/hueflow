@@ -16,7 +16,7 @@ function Hero() {
     window.setHero = (name) => byName[name] && setProps(byName[name]);
   }, []);
   return (
-    <ShaderGradientCanvas style={{ position: 'absolute', inset: 0 }} lazyLoad={false} {...canvasProps}>
+    <ShaderGradientCanvas style={{ position: 'absolute', inset: 0, background: '#000' /* empty scene is transparent: don't show the poster through it */ }} lazyLoad={false} {...canvasProps}>
       <ShaderGradient {...props} control="props" />
     </ShaderGradientCanvas>
   );
@@ -122,7 +122,7 @@ function Editor() {
   return (
     <>
       <div className="editor-stage">
-        <ShaderGradientCanvas style={{ position: 'absolute', inset: 0 }} lazyLoad {...canvasProps}>
+        <ShaderGradientCanvas style={{ position: 'absolute', inset: 0, background: '#000' /* empty scene is transparent: don't show the poster through it */ }} lazyLoad {...canvasProps}>
           <ShaderGradient {...gradientProps} control="props" />
         </ShaderGradientCanvas>
       </div>
