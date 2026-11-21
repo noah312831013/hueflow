@@ -14,7 +14,7 @@ site/     the sales website (static HTML)
 - **UI:** an Apple TV–style gallery and a live editor (Shape / Colors / Effects / Camera), and saved gradients.
 - **System:** a desktop-level window per display (each can be enabled and assigned separately) and a 🌈 menu bar item. It pauses on demand, on battery or behind full-screen apps, and has an idle screen saver. A Performance submenu holds five options, all on by default: 30 fps wallpapers, a half-resolution 3D scene (grain stays full resolution), pausing while covered, depth/MSAA buffers in GPU tile memory, and 15 fps in Low Power Mode or when the Mac runs hot. `native/bench.sh` measures the GPU time per frame.
 - **System Settings `.saver`:** the same Metal renderer, installed from the Screen Saver popover.
-- **Licensing:** a 7-day free trial, then a Lemon Squeezy license key (`native/App/License.swift`).
+- **Licensing:** free with the Afterglow wallpaper only (no editor); a Polar license key unlocks everything (`native/App/License.swift`), activated per Mac through Polar's public customer-portal API.
 
 ```sh
 cd native
@@ -46,9 +46,9 @@ Host `site/` on any static host (Vercel, Netlify, GitHub Pages).
 
 ## Launch checklist
 
-1. **Lemon Squeezy:** create the store and the product (US$9.99, one-time), enable license keys and set the activation limit to 3.
-2. Put the IDs in `LicenseConfig` in `native/App/License.swift` (`storeID`, `productID`, `checkoutURL`).
-3. Replace the checkout link in `site/index.html` if the product changes.
+1. **Polar** (merchant of record; pays out to a Taiwanese bank): create the organization, connect the payout account, then the product (US$9.99, one-time) with a License Keys benefit limited to 3 activations. Test the whole purchase in Polar's sandbox first (`LicenseConfig.api` → `https://sandbox-api.polar.sh/...`).
+2. Set `organizationID` and `checkoutURL` in `LicenseConfig` in `native/App/License.swift`.
+3. Replace the three `https://polar.sh/` Buy links in `site/index.html` with the same checkout link.
 4. Have the terms in `site/legal.html` reviewed.
 5. **Apple Developer Program** (US$99/year): create a Developer ID Application certificate, then run:
    ```sh

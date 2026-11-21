@@ -53,6 +53,7 @@ let tabs: [(String, [ControlSpec])] = [
         ControlSpec(key: "color2", label: "Color 2", kind: .color),
         ControlSpec(key: "color3", label: "Color 3", kind: .color),
         ControlSpec(key: "colorPattern", label: "Pattern", kind: .options(["position": "Gradient", "noise": "Noise", "warp": "Warp", "cells": "Cells", "ridged": "Ridged", "waves": "Waves"])),
+        ControlSpec(key: "saturation", label: "Saturation", kind: .range(0, 2, 0.05), fallback: 1),
         ControlSpec(key: "colorScale", label: "Scale", kind: .range(0.1, 5, 0.1), show: hasColorPattern, fallback: 1, advanced: true),
         ControlSpec(key: "colorSharpness", label: "Sharpness", kind: .range(0, 1, 0.05), show: hasColorPattern, fallback: 0.5, advanced: true),
     ]),
@@ -177,16 +178,19 @@ struct GalleryRoot: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .sheet(isPresented: Binding(get: { showLicense || license.state == .expired }, set: { showLicense = $0 })) {
+        .sheet(isPresented: $showLicense) {
             LicenseSheet(license: license)
         }
         .animation(tvSpring, value: editing?.identity)
         .animation(tvSpring, value: store.toast)
         .preferredColorScheme(.dark)
-        .onAppear { focused = store.cfg.default.map { d in presets.first { $0.props.key == d.props.key } ?? d } ?? presets[0] }
+        .onAppear { focused = store.current.map { d in presets.first { $0.props.key == d.props.key } ?? d } ?? presets[0] }
     }
 
-    private func open(_ e: Entry) { draft = e.props; editing = e }
+    /// Free version: only presets[0] as wallpaper and no editor; anything else opens the purchase sheet.
+    private func locked(_ e: Entry) -> Bool { !license.isUnlocked && e.props != presets[0].props }
+    private func open(_ e: Entry) { if license.isUnlocked { draft = e.props; editing = e } else { showLicense = true } }
+    private func use(_ e: Entry) { if locked(e) { showLicense = true } else { store.apply(e); store.show("Set as wallpaper") } }
     private func close() {
         if let e = editing { focused = Entry(id: e.id, name: e.name, props: draft, builtin: e.builtin) }
         editing = nil
@@ -197,9 +201,8 @@ struct GalleryRoot: View {
             HStack(alignment: .center) {
                 Button { showLicense = true } label: {
                     switch license.state {
-                    case .trial(let days): Label(days == 1 ? "1 day left · Buy" : "\(days) days left · Buy", systemImage: "sparkles")
+                    case .free: Label("Unlock All Gradients", systemImage: "sparkles")
                     case .licensed: Label("Hueflow", systemImage: "checkmark.seal.fill")
-                    case .expired: Label("Trial ended", systemImage: "lock.fill")
                     }
                 }
                 .buttonStyle(GlassButton())
@@ -220,9 +223,9 @@ struct GalleryRoot: View {
                     .contentTransition(.opacity)
                     .id(focused.name)
                 HStack(spacing: 10) {
-                    Button { store.apply(focused); store.show("Set as wallpaper") } label: { Label("Set as Wallpaper", systemImage: "desktopcomputer") }
+                    Button { use(focused) } label: { Label(locked(focused) ? "Unlock to Use" : "Set as Wallpaper", systemImage: locked(focused) ? "lock.fill" : "desktopcomputer") }
                         .buttonStyle(PrimaryButton())
-                    Button { open(focused) } label: { Label("Edit", systemImage: "slider.horizontal.3") }
+                    Button { open(focused) } label: { Label("Edit", systemImage: license.isUnlocked ? "slider.horizontal.3" : "lock.fill") }
                         .buttonStyle(GlassButton())
                 }
                 .padding(.top, 8)
@@ -231,9 +234,9 @@ struct GalleryRoot: View {
             .animation(.easeInOut(duration: 0.3), value: focused.name)
 
             VStack(alignment: .leading, spacing: 18) {
-                Row(title: "Featured", entries: presets, store: store, focused: $focused, open: open)
+                Row(title: "Featured", entries: presets, store: store, focused: $focused, open: open, use: use, locked: locked)
                 if !store.cfg.custom.isEmpty {
-                    Row(title: "My Gradients", entries: store.cfg.custom, store: store, focused: $focused, open: open)
+                    Row(title: "My Gradients", entries: store.cfg.custom, store: store, focused: $focused, open: open, use: use, locked: locked)
                 }
             }
             .padding(.top, 28).padding(.bottom, 28)
@@ -252,18 +255,20 @@ struct Row: View {
     @ObservedObject var store: Store
     @Binding var focused: Entry
     let open: (Entry) -> Void
+    let use: (Entry) -> Void
+    let locked: (Entry) -> Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title).font(.system(size: 17, weight: .semibold)).padding(.horizontal, 48)
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 22) {
-                    let current = store.cfg.default?.props
+                    let current = store.current?.props
                     ForEach(entries, id: \.identity) { e in
-                        Card(entry: e, current: current == e.props, focused: focused.identity == e.identity)
+                        Card(entry: e, current: current == e.props, focused: focused.identity == e.identity, locked: locked(e))
                             .onTapGesture { focused = e } // no double-click: SwiftUI would hold every single click until it times out
                             .contextMenu {
-                                Button("Set as Wallpaper") { store.apply(e); store.show("Set as wallpaper") }
+                                Button("Set as Wallpaper") { use(e) }
                                 Button("Edit") { open(e) }
                                 if let id = e.id, e.builtin != true {
                                     Divider()
@@ -284,6 +289,7 @@ struct Card: View {
     let entry: Entry
     let current: Bool
     let focused: Bool
+    let locked: Bool
     @State private var image: NSImage?
     @State private var tilt: CGPoint? // cursor over the thumbnail, -1…1 per axis; nil when not hovered
     private var lifted: Bool { focused || tilt != nil }
@@ -304,7 +310,10 @@ struct Card: View {
                 .overlay(RadialGradient(colors: [.white.opacity(tilt == nil ? 0 : 0.28), .clear],
                                         center: UnitPoint(x: ((tilt?.x ?? 0) + 1) / 2, y: ((tilt?.y ?? 0) + 1) / 2), startRadius: 0, endRadius: 180)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous)).allowsHitTesting(false))
-                if current {
+                if locked {
+                    Image(systemName: "lock.circle.fill").font(.system(size: 18)).symbolRenderingMode(.palette)
+                        .foregroundStyle(.white, .black.opacity(0.35)).padding(8)
+                } else if current {
                     Image(systemName: "checkmark.circle.fill").font(.system(size: 18)).symbolRenderingMode(.palette)
                         .foregroundStyle(.white, .black.opacity(0.35)).padding(8)
                 }
@@ -474,12 +483,8 @@ struct LicenseSheet: View {
                     Spacer()
                     Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
                 }
-            case .trial, .expired:
-                if case .trial(let days) = license.state {
-                    Text(days == 1 ? "1 day left in your free trial. Buy once, keep it forever." : "\(days) days left in your free trial. Buy once, keep it forever.").foregroundStyle(.secondary)
-                } else {
-                    Text("Your free trial has ended. Buy Hueflow and enter your license key to keep your live wallpapers and screen saver.").foregroundStyle(.secondary)
-                }
+            case .free:
+                Text("The free version includes the \(presets[0].name) wallpaper. Buy once to unlock every gradient, the editor and your own gradients, forever.").foregroundStyle(.secondary)
                 Button { NSWorkspace.shared.open(LicenseConfig.checkoutURL) } label: {
                     Text("Buy Hueflow").frame(maxWidth: .infinity)
                 }
@@ -489,7 +494,7 @@ struct LicenseSheet: View {
                 TextField("XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX", text: $key).textFieldStyle(.roundedBorder).font(.body.monospaced())
                 if let error { Text(error).font(.callout).foregroundStyle(.red) }
                 HStack {
-                    if case .trial = license.state { Button("Later") { dismiss() } }
+                    Button("Later") { dismiss() }
                     Spacer()
                     Button(busy ? "Activating…" : "Activate") {
                         busy = true; error = nil
@@ -505,7 +510,6 @@ struct LicenseSheet: View {
         }
         .padding(24)
         .frame(width: 420)
-        .interactiveDismissDisabled(license.state == .expired)
     }
 }
 

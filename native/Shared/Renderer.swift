@@ -11,7 +11,7 @@ using namespace metal;
 struct Uniforms {
   float4x4 mvp;
   float4x4 model;
-  float4 c1, c2, c3;
+  float4 c1, c2, c3; // c1.w: saturation
   float4 a;      // time, speed, density, strength
   float4 b;      // frequency, amplitude, brightness, reflection
   float4 c;      // type (0 plane, 1 waterPlane, 2 sphere), env light, env preset, color pattern scale
@@ -185,6 +185,7 @@ fragment float4 sceneFragment(VOut in [[stage_in]], constant Uniforms& u [[buffe
     float f = saturate(pattern(int(u.d.z) - 1, pp, u.d.w) * 0.8 + 0.5); // noise rarely nears ±1: stretch to use all three colors
     d = lerp(lerp(c1, c2, smoothstep(0.0, 0.5, f)), c3, smoothstep(0.5, 1.0, f));
   }
+  d = max(lerp(float3(dot(d, float3(0.2126, 0.7152, 0.0722))), d, u.c1.w), 0.0); // saturation: 0 gray, 1 as is, 2 vivid
   // MeshPhysicalMaterial (metalness 0.2) under an ambient light of brightness*PI: Lambert gives 0.8 * brightness.
   if (u.c.y < 0.5) return float4(d * 0.8 * u.b.z, z);
   float3 n = in.normal;
@@ -324,7 +325,7 @@ struct GradientParams {
     var brightness: Float = 1.2, reflection: Float = 0.1
     var subdivision = 0
     var shapePattern = 0, colorPattern = 0 // colorPattern 0 = position gradient, else pattern + 1
-    var shapeSharpness: Float = 0.5, colorSharpness: Float = 0.5, colorScale: Float = 1
+    var shapeSharpness: Float = 0.5, colorSharpness: Float = 0.5, colorScale: Float = 1, saturation: Float = 1
     var grainAmount: Float = 1, grainSize: Float = 2
     var bokeh = false, focus: Float = 0, blur: Float = 0.5
     var music = false, musicColor = false, musicIntensity: Float = 1
@@ -348,7 +349,7 @@ struct GradientParams {
         shapePattern = patternKinds[p.str("shapePattern", "noise")] ?? 0
         colorPattern = patternKinds[p.str("colorPattern", "position")].map { $0 + 1 } ?? 0
         shapeSharpness = max(0, min(1, f("shapeSharpness", 0.5))); colorSharpness = max(0, min(1, f("colorSharpness", 0.5)))
-        colorScale = max(0.1, min(5, f("colorScale", 1)))
+        colorScale = max(0.1, min(5, f("colorScale", 1))); saturation = max(0, min(2, f("saturation", 1)))
         // Hueflow extras; the defaults are ShaderGradient's fixed halftone.
         grainAmount = max(0, min(1, f("grainAmount", 1))); grainSize = max(1, min(8, f("grainSize", 2)))
         music = p.str("music", "off") == "on"; musicColor = p.str("musicTarget", "strength") == "color"; musicIntensity = max(0, min(3, f("musicIntensity", 1)))
@@ -372,7 +373,7 @@ struct GradientParams {
             n.c1 = l3(c1, t.c1); n.c2 = l3(c2, t.c2); n.c3 = l3(c3, t.c3)
             n.brightness = l(brightness, t.brightness); n.reflection = l(reflection, t.reflection)
             n.shapeSharpness = l(shapeSharpness, t.shapeSharpness); n.colorSharpness = l(colorSharpness, t.colorSharpness)
-            n.colorScale = l(colorScale, t.colorScale)
+            n.colorScale = l(colorScale, t.colorScale); n.saturation = l(saturation, t.saturation)
             n.grainAmount = l(grainAmount, t.grainAmount); n.grainSize = l(grainSize, t.grainSize)
             n.focus = l(focus, t.focus); n.blur = l(blur, t.blur); n.musicIntensity = l(musicIntensity, t.musicIntensity)
             n.azimuth = l(azimuth, t.azimuth); n.polar = l(polar, t.polar); n.distance = l(distance, t.distance)
@@ -509,7 +510,7 @@ final class Renderer {
         var u = Uniforms()
         u.mvp = proj * lookAt(eye: eye) * model
         u.model = model
-        u.c1 = SIMD4(p.c1, 1); u.c2 = SIMD4(p.c2, 1); u.c3 = SIMD4(p.c3, 1)
+        u.c1 = SIMD4(p.c1, p.saturation); u.c2 = SIMD4(p.c2, 1); u.c3 = SIMD4(p.c3, 1)
         u.a = [time, p.speed, p.density, p.strength]
         u.b = [p.frequency, p.amplitude, p.brightness, p.reflection]
         u.c = [Float(p.type), p.env ? 1 : 0, Float(p.envPreset), p.colorScale]

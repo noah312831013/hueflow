@@ -2,6 +2,7 @@
 // the menu bar item, the built-in idle screen saver and installing the System Settings .saver.
 import AppKit
 import IOKit.ps
+import IOKit.pwr_mgt
 import ServiceManagement
 import SwiftUI
 
@@ -77,7 +78,7 @@ final class Store: ObservableObject {
     private var saverStartedAt = Date.distantPast
     private var statusItem: NSStatusItem?
     var onShowGallery: () -> Void = {}
-    /// Trial running or licensed; wallpapers and the screen saver only run while true.
+    /// Licensed. Otherwise every display and the screen saver show only the free wallpaper, presets[0].
     var isUnlocked: () -> Bool = { true }
 
     private static let dir: URL = {
@@ -114,7 +115,6 @@ final class Store: ObservableObject {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.applyPause() // leaving a full-screen Space: resume now, not on the next 1 s poll
-                guard self.isUnlocked() else { return }
                 for s in NSScreen.screens where self.isEnabled(s.displayID) { self.matchSystemWallpaper(s, (self.entry(for: s.displayID) ?? presets[0]).props) }
             }
         }
@@ -139,7 +139,9 @@ final class Store: ObservableObject {
     var displays: [Display] {
         NSScreen.screens.enumerated().map { i, s in Display(id: s.displayID, label: s.localizedName.isEmpty ? "Display \(i + 1)" : s.localizedName) }
     }
-    func entry(for id: UInt32) -> Entry? { cfg.perDisplay[String(id)] ?? cfg.default }
+    /// The wallpaper actually shown on displays without their own pick: the free version always shows presets[0].
+    var current: Entry? { isUnlocked() ? cfg.default : presets[0] }
+    func entry(for id: UInt32) -> Entry? { isUnlocked() ? cfg.perDisplay[String(id)] ?? cfg.default : presets[0] }
     func isEnabled(_ id: UInt32) -> Bool { !cfg.disabled.contains(id) }
 
     private func changed(rebuild: Bool = true) {
@@ -151,6 +153,7 @@ final class Store: ObservableObject {
 
     /// target: nil = all displays.
     func apply(_ entry: Entry, to target: UInt32? = nil) {
+        guard isUnlocked() || entry.props == presets[0].props else { return }
         let e = Entry(name: entry.name, props: entry.props)
         if let t = target {
             cfg.perDisplay[String(t)] = e
@@ -263,7 +266,6 @@ final class Store: ObservableObject {
     private func renderDesktops() {
         desktops.forEach { $0.orderOut(nil) }
         desktops = []
-        guard isUnlocked() else { return }
         desktops = NSScreen.screens.filter { isEnabled($0.displayID) }.map { screen in
             // Full screen frame so the wallpaper also shows behind a transparent menu bar.
             let w = NSWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
@@ -359,13 +361,14 @@ final class Store: ObservableObject {
     // MARK: built-in screen saver
 
     private var saverOptions: SaverOptions {
-        SaverOptions(shuffle: cfg.saver.source == "shuffle", clock: cfg.saver.clock, props: cfg.default?.props, extra: cfg.custom.map(\.props))
+        isUnlocked() ? SaverOptions(shuffle: cfg.saver.source == "shuffle", clock: cfg.saver.clock, props: cfg.default?.props, extra: cfg.custom.map(\.props))
+            : SaverOptions(shuffle: false, clock: cfg.saver.clock, props: presets[0].props, extra: [])
     }
 
-    // shortcut: idle is polled and the saver is our own window, so it only runs while the app is open and doesn't know
-    // about video playback in other apps; the System Settings .saver (installSaver) covers that.
+    // shortcut: idle is polled and the saver is our own window, so it only runs while the app is open; the System
+    // Settings .saver (installSaver) covers the rest.
     func startSaver() {
-        guard savers.isEmpty, isUnlocked() else { return }
+        guard savers.isEmpty else { return }
         saverStartedAt = Date()
         savers = NSScreen.screens.map { screen in
             let w = NSWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
@@ -398,10 +401,18 @@ final class Store: ObservableObject {
         if !savers.isEmpty {
             // Any input dismisses it; the grace period ignores the click that started it.
             if idle < 1 && Date().timeIntervalSince(saverStartedAt) > 2.5 { stopSaver() }
-        } else if cfg.saver.enabled && idle >= Double(cfg.saver.minutes * 60) && !screenLocked && !systemSaverRunning {
+        } else if cfg.saver.enabled && idle >= Double(cfg.saver.minutes * 60) && !screenLocked && !systemSaverRunning
+                    && !displayKeptAwake && fullScreenDisplays.isEmpty { // watching a video or presenting
             startSaver()
         }
         applyPause() // picks up battery and full-screen changes
+    }
+
+    /// Video players and slideshows ask macOS to keep the display awake while playing; its own saver waits for them too.
+    private var displayKeptAwake: Bool {
+        var status: Unmanaged<CFDictionary>?
+        guard IOPMCopyAssertionsStatus(&status) == kIOReturnSuccess else { return false }
+        return ((status?.takeRetainedValue() as? [String: Int])?["PreventUserIdleDisplaySleep"] ?? 0) > 0
     }
 
     private var screenLocked: Bool {
@@ -410,7 +421,7 @@ final class Store: ObservableObject {
 
     // MARK: System Settings .saver
 
-    // shortcut: an installed .saver keeps working after the trial ends; have the saver check the license if that matters.
+    // shortcut: an installed .saver keeps the gradients it was installed with after a license is deactivated; have the saver check the license if that matters.
     /// Copies the bundled Hueflow.saver with the current saver settings and a thumbnail baked in, signs it ad hoc,
     /// installs it to ~/Library/Screen Savers and opens System Settings so it can be picked.
     func installSaver() async throws {
@@ -423,7 +434,7 @@ final class Store: ObservableObject {
         let res = staging.appendingPathComponent("Contents/Resources")
         try fm.createDirectory(at: res, withIntermediateDirectories: true)
         try JSONEncoder().encode(saverOptions).write(to: res.appendingPathComponent("saver-config.json"))
-        let props = cfg.default?.props ?? presets[0].props
+        let props = saverOptions.props ?? presets[0].props
         for (name, w) in [("thumbnail.png", 320), ("thumbnail@2x.png", 640)] {
             if let img = Renderer.shared.snapshot(props, width: w, height: w * 5 / 8),
                let png = NSBitmapImageRep(cgImage: img).representation(using: .png, properties: [:]) {
@@ -483,10 +494,10 @@ final class Store: ObservableObject {
         // Everyday actions at the top level; settings grouped in submenus.
         item("Open Hueflow") { [weak self] in self?.onShowGallery() }
         item("Pause", checked: cfg.paused) { [weak self] in self?.toggle(\.paused) }
-        if !cfg.recent.isEmpty {
+        if !cfg.recent.isEmpty && isUnlocked() {
             m.addItem(.separator())
             m.addItem(.sectionHeader(title: "Recent"))
-            let current = cfg.default?.props.key
+            let current = self.current?.props.key
             for e in cfg.recent.prefix(5) { item(e.name, checked: e.props.key == current) { [weak self] in self?.apply(e) } }
         }
         m.addItem(.separator())

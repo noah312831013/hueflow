@@ -5,7 +5,9 @@ import { createRoot } from 'react-dom/client';
 import { ShaderGradientCanvas, ShaderGradient, presets } from '@shadergradient/react';
 import { setPatternProps } from './patterns.js';
 
-const byName = Object.fromEntries(Object.values(presets).map((p) => [p.title, p.props]));
+// Afterglow is Hueflow's own preset and the free version's wallpaper (native/Shared/Presets.swift).
+const afterglow = {"uFrequency": 2.2, "fov": 45, "positionY": 0.038, "brightness": 1.3, "lightType": "3d", "pixelDensity": 1, "bgColor1": "#000000", "cAzimuthAngle": 79.4, "cPolarAngle": 69.8, "color1": "#ff7a33", "reflection": 0.4, "cDistance": 2.9, "wireframe": false, "animate": "on", "axesHelper": "on", "color3": "#ffc53d", "cameraZoom": 19.5, "positionX": 0.859, "color2": "#33a0ff", "bgColor2": "#000000", "rotationX": -74, "positionZ": -0.824, "grainAmount": 0.5, "rotationZ": 0, "rotationY": 1, "uDensity": 1.2, "envPreset": "city", "type": "waterPlane", "uStrength": 1.3, "uTime": 0, "grain": "on", "saturation": 0.6, "uSpeed": 0.1, "grainSize": 1.5, "uAmplitude": 2.3};
+const byName = { Afterglow: afterglow, ...Object.fromEntries(Object.values(presets).map((p) => [p.title, p.props])) };
 const canvasProps = { pixelDensity: 1, fov: 45, pointerEvents: 'none', envBasePath: 'assets/hdr/' };
 
 function Hero() {
@@ -22,7 +24,7 @@ function Hero() {
 
 // Same keys, labels, ranges and Advanced split as the app's editor (native/App/GalleryView.swift). Pattern keys go to
 // src/patterns.js's uniforms instead of ShaderGradient.
-const patternKeys = ['shapePattern', 'shapeSharpness', 'colorPattern', 'colorScale', 'colorSharpness'];
+const patternKeys = ['shapePattern', 'shapeSharpness', 'colorPattern', 'colorScale', 'colorSharpness', 'saturation'];
 const patternNames = [['noise', 'Noise'], ['warp', 'Warp'], ['cells', 'Cells'], ['ridged', 'Ridged'], ['waves', 'Waves']];
 const hasColorPattern = (p) => (p.colorPattern ?? 'position') !== 'position';
 const isSphere = (p) => p.type === 'sphere';
@@ -44,6 +46,7 @@ const tabs = {
     { key: 'color2', label: 'Color 2', color: true },
     { key: 'color3', label: 'Color 3', color: true },
     { key: 'colorPattern', label: 'Pattern', options: [['position', 'Gradient'], ...patternNames], fallback: 'position' },
+    { key: 'saturation', label: 'Saturation', range: [0, 2, 0.05], fallback: 1 },
     { key: 'colorScale', label: 'Scale', range: [0.1, 5, 0.1], show: hasColorPattern, fallback: 1, advanced: true },
     { key: 'colorSharpness', label: 'Sharpness', range: [0, 1, 0.05], show: hasColorPattern, fallback: 0.5, advanced: true },
   ],

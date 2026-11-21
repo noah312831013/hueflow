@@ -7,7 +7,7 @@ export const patternKinds = { noise: 0, warp: 1, cells: 2, ridged: 3, waves: 4 }
 // Shared uniform objects: the editor writes .value, every patched program reads them.
 export const sgUniforms = {
   uShapePattern: { value: 0 }, uShapeSharp: { value: 0.5 },
-  uColorPattern: { value: 0 }, uColorSharp: { value: 0.5 }, uColorScale: { value: 1 },
+  uColorPattern: { value: 0 }, uColorSharp: { value: 0.5 }, uColorScale: { value: 1 }, uSaturation: { value: 1 },
 };
 
 /** Props from the editor -> uniform values (same defaults and clamps as GradientParams in the app). */
@@ -18,11 +18,12 @@ export function setPatternProps(p) {
   sgUniforms.uColorPattern.value = p.colorPattern in patternKinds ? patternKinds[p.colorPattern] + 1 : 0;
   sgUniforms.uColorSharp.value = clamp(p.colorSharpness, 0, 1, 0.5);
   sgUniforms.uColorScale.value = clamp(p.colorScale, 0.1, 5, 1);
+  sgUniforms.uSaturation.value = clamp(p.saturation, 0, 2, 1);
 }
 
 // Prefixed names: the library's vertex shader already defines cnoise, mod289, permute...
 const glsl = /* glsl */ `
-uniform float uShapePattern, uShapeSharp, uColorPattern, uColorSharp, uColorScale;
+uniform float uShapePattern, uShapeSharp, uColorPattern, uColorSharp, uColorScale, uSaturation;
 vec3 sgMod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
 vec4 sgMod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
 vec4 sgPermute(vec4 x) { return sgMod289(((x * 34.0) + 1.0) * x); }
@@ -120,7 +121,8 @@ function patch(shader, sphere) {
     vec3 sgP = vPos * ${sphere ? '1.5' : '0.6'} * uColorScale + uTime * uSpeed * 0.5;
     float sgF = clamp(sgPattern(int(uColorPattern) - 1, sgP, uColorSharp) * 0.8 + 0.5, 0.0, 1.0);
     diffuseColor.rgb = mix(mix(color1, color2, smoothstep(0.0, 0.5, sgF)), color3, smoothstep(0.5, 1.0, sgF));
-  }`);
+  }
+  diffuseColor.rgb = max(mix(vec3(dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722))), diffuseColor.rgb, uSaturation), 0.0);`);
   return [v, f];
 }
 

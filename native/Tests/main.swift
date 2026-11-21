@@ -17,6 +17,7 @@ assert(abs(r.brightness - 1.6) < 1e-5, "eases toward target")
 
 let pat = GradientParams(["shapePattern": .str("cells"), "colorPattern": .str("noise"), "colorScale": .num(99)])
 assert(pat.shapePattern == 2 && pat.colorPattern == 1 && pat.colorScale == 5, "patterns parse; color 0 is the position gradient")
+assert(GradientParams([:]).saturation == 1 && GradientParams(["saturation": .num(9)]).saturation == 2, "saturation defaults to 1, clamps to 0...2")
 assert(GradientParams([:]).colorPattern == 0 && GradientParams(["shapePattern": .str("bogus")]).shapePattern == 0)
 
 let cam: Props = ["type": .str("plane"), "cAzimuthAngle": .num(10), "cPolarAngle": .num(178), "cDistance": .num(4)]
@@ -32,7 +33,7 @@ let panned = back.camera(.pan(dx: 100, dy: 0, viewHeight: 800))
 assert(panned.num("positionX", 0) < 0 && abs(panned.num("positionY", 0)) < 1e-9, "seen from -z, screen-right is world -x")
 assert(back.camera(.pan(dx: 0, dy: 100, viewHeight: 800)).num("positionY", 0) < 0, "dragging down moves the model down")
 
-assert(presets.count == 10 && presets[0].name == "Halo")
+assert(presets.count == 11 && presets[0].name == "Afterglow" && presets[1].name == "Halo") // presets[0] is the free wallpaper
 assert(Renderer.shared.snapshot(presets[0].props, width: 64, height: 40) != nil, "Metal renders offscreen")
 let half = Renderer.shared.makeTargets(width: 101, height: 40, scale: 0.5)
 assert(half.scene.width == 51 && half.scene.height == 20 && half.depth.width == 51, "half-res scene targets")
