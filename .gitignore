@@ -2,6 +2,5 @@
 node_modules/
 .env*
 .vercel/
-# Build outputs (native/build.sh); the site's download zip is copied from there.
+# Build outputs (native/build.sh)
 native/build/
-site/downloads/

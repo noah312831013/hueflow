@@ -1,9 +1,10 @@
 #!/bin/sh
 # Builds the native app and its screen saver with swiftc (no Xcode project needed), universal, signed ad hoc:
 #   build/Hueflow.app  (contains Resources/Hueflow.saver, installed from the app's screen saver popover)
-#   build/Hueflow.zip  (what the website offers for download)
-# For sale builds set DEVELOPER_ID="Developer ID Application: Name (TEAMID)" and, to notarize,
-# NOTARY_PROFILE=<name saved with `xcrun notarytool store-credentials`>. Without them it signs ad hoc (runs on this Mac only).
+#   build/Hueflow.zip  (attach to a GitHub release; the website links to the latest one)
+# For signed builds set DEVELOPER_ID="Developer ID Application: Name (TEAMID)" and, to notarize,
+# NOTARY_PROFILE=<name saved with `xcrun notarytool store-credentials`>. Without them it signs ad hoc: other Macs must
+# allow it once in System Settings › Privacy & Security (see README).
 set -e
 cd "$(dirname "$0")"
 IDENTITY="${DEVELOPER_ID:--}"
@@ -43,5 +44,3 @@ if [ -n "$NOTARY_PROFILE" ]; then
   rm "$OUT/Hueflow.zip" && ditto -c -k --keepParent "$APP" "$OUT/Hueflow.zip"
 fi
 echo "built $APP and $OUT/Hueflow.zip"
-
-mkdir -p ../site/downloads && cp "$OUT/Hueflow.zip" ../site/downloads/ # served by the website

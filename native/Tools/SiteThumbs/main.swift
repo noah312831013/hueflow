@@ -22,7 +22,7 @@ for k in patternKinds.keys.sorted() {
     try write(p, "patterns", k)
 }
 
-// Afterglow (presets[0], the free wallpaper) is the brand image: website hero, app icon and favicon.
+// Afterglow (presets[0], the default wallpaper) is the brand image: website hero, app icon and favicon.
 let brand = presets[0].props
 guard let hero = Renderer.shared.thumbnail(brand, pointSize: CGSize(width: 960, height: 600), scale: 1),
       let heroJPG = NSBitmapImageRep(cgImage: hero).representation(using: .jpeg, properties: [.compressionFactor: 0.88]) else { fatalError("hero") }

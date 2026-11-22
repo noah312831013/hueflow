@@ -732,3 +732,25 @@ class GradientView: MTKView, MTKViewDelegate {
         cmd.commit()
     }
 }
+
+/// Black screen mask in points, y up: a menu bar of height `menuBar` with rounded corners below it (nil = none) and/or
+/// rounded corners at the bottom of the screen. The radius matches the MacBook Pro's physical corners by eye; macOS has
+/// no API for it.
+let screenCornerRadius: CGFloat = 16
+func screenMaskPath(width w: CGFloat, height h: CGFloat, menuBar: CGFloat?, bottom: Bool, radius r: CGFloat = screenCornerRadius) -> CGPath {
+    let p = CGMutablePath()
+    if let bar = menuBar {
+        let y = h - bar
+        p.addRect(CGRect(x: 0, y: y, width: w, height: bar))
+        p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: r, y: y))
+        p.addArc(center: CGPoint(x: r, y: y - r), radius: r, startAngle: .pi / 2, endAngle: .pi, clockwise: false); p.closeSubpath()
+        p.move(to: CGPoint(x: w, y: y)); p.addLine(to: CGPoint(x: w, y: y - r))
+        p.addArc(center: CGPoint(x: w - r, y: y - r), radius: r, startAngle: 0, endAngle: .pi / 2, clockwise: false); p.closeSubpath()
+    }
+    guard bottom else { return p }
+    p.move(to: .zero); p.addLine(to: CGPoint(x: r, y: 0))
+    p.addArc(center: CGPoint(x: r, y: r), radius: r, startAngle: -.pi / 2, endAngle: -.pi, clockwise: true); p.closeSubpath()
+    p.move(to: CGPoint(x: w, y: 0)); p.addLine(to: CGPoint(x: w, y: r))
+    p.addArc(center: CGPoint(x: w - r, y: r), radius: r, startAngle: 0, endAngle: -.pi / 2, clockwise: true); p.closeSubpath()
+    return p
+}

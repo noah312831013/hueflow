@@ -1,10 +1,26 @@
 # Hueflow
 
-Living 3D gradient wallpapers and a screen saver for macOS, rendered natively with Metal.
+Living 3D gradient wallpapers and a screen saver for macOS, rendered natively with Metal. Free and open source (MIT).
+
+**Website:** https://hueflow-eight.vercel.app
+
+## Download
+
+1. Download **Hueflow.zip** from the [latest release](https://github.com/noah312831013/hueflow/releases/latest) and unzip it.
+2. Move **Hueflow.app** to Applications and open it.
+3. The app isn't notarized by Apple, so macOS blocks the first launch. Open **System Settings › Privacy & Security**, scroll
+   down and click **Open Anyway** next to Hueflow. Or run once in Terminal:
+   ```sh
+   xattr -dr com.apple.quarantine /Applications/Hueflow.app
+   ```
+
+Requires macOS 14 Sonoma or later, Apple silicon or Intel.
+
+## Repository
 
 ```
 native/   the Mac app (Swift + Metal), built with swiftc; no Xcode project
-site/     the sales website (static HTML)
+site/     the website (static HTML)
 ```
 
 ## The app
@@ -14,11 +30,11 @@ site/     the sales website (static HTML)
 - **UI:** an Apple TV–style gallery and a live editor (Shape / Colors / Effects / Camera), and saved gradients.
 - **System:** a desktop-level window per display (each can be enabled and assigned separately) and a 🌈 menu bar item. It pauses on demand, on battery or behind full-screen apps, and has an idle screen saver. A Performance submenu holds five options, all on by default: 30 fps wallpapers, a half-resolution 3D scene (grain stays full resolution), pausing while covered, depth/MSAA buffers in GPU tile memory, and 15 fps in Low Power Mode or when the Mac runs hot. `native/bench.sh` measures the GPU time per frame.
 - **System Settings `.saver`:** the same Metal renderer, installed from the Screen Saver popover.
-- **Licensing:** free with the Afterglow wallpaper only (no editor); a Polar license key unlocks everything (`native/App/License.swift`), activated per Mac through Polar's public customer-portal API.
+- **Built-in display:** optional black menu bar and rounded bottom corners that match the MacBook Pro's physical screen corners (menu bar › Displays).
 
 ```sh
 cd native
-./build.sh      # build/Hueflow.app + build/Hueflow.zip (also copied to site/downloads/); needs Xcode
+./build.sh      # build/Hueflow.app + build/Hueflow.zip; needs Xcode
 ./test.sh       # self-checks
 open build/Hueflow.app
 ```
@@ -29,7 +45,7 @@ Settings are stored in `~/Library/Application Support/Hueflow/config.json`.
 
 ## The website
 
-`site/index.html` is the landing page and `site/legal.html` holds the terms, privacy and refunds. The hero gradient and the "Make it yours" editor use the ShaderGradient React library. `site/build.mjs` hooks the library's shader compile so `site/src/patterns.js` can add the app's patterns to the editor. The hook matches `@shadergradient/react` 2.4.20 exactly (pinned in `package.json`), and the build fails if a library update changes that code. Bundle with:
+`site/index.html` is the landing page and `site/legal.html` holds the license and privacy notes. The hero gradient and the "Make it yours" editor use the ShaderGradient React library. `site/build.mjs` hooks the library's shader compile so `site/src/patterns.js` can add the app's patterns to the editor. The hook matches `@shadergradient/react` 2.4.20 exactly (pinned in `package.json`), and the build fails if a library update changes that code. Bundle with:
 
 ```sh
 npm install
@@ -44,15 +60,25 @@ native/site-thumbs.sh
 
 Host `site/` on any static host (Vercel, Netlify, GitHub Pages).
 
-## Launch checklist
+## Releasing
 
-1. **Polar** (merchant of record; pays out to a Taiwanese bank): create the organization, connect the payout account, then the product (US$9.99, one-time) with a License Keys benefit limited to 3 activations. Test the whole purchase in Polar's sandbox first (`LicenseConfig.api` → `https://sandbox-api.polar.sh/...`).
-2. Set `organizationID` and `checkoutURL` in `LicenseConfig` in `native/App/License.swift`.
-3. Replace the three `https://polar.sh/` Buy links in `site/index.html` with the same checkout link.
-4. Have the terms in `site/legal.html` reviewed.
-5. **Apple Developer Program** (US$99/year): create a Developer ID Application certificate, then run:
-   ```sh
-   xcrun notarytool store-credentials hueflow   # once
-   DEVELOPER_ID="Developer ID Application: Your Name (TEAMID)" NOTARY_PROFILE=hueflow native/build.sh
-   ```
-   Without signing and notarization, other Macs will block the app.
+Bump `CFBundleShortVersionString` and `CFBundleVersion` in `native/App/Info.plist` and `native/Saver/Info.plist`, then:
+
+```sh
+native/build.sh
+gh release create v1.2.0 native/build/Hueflow.zip --title "Hueflow 1.2.0" --notes "..."
+```
+
+The website's Download buttons point to `releases/latest/download/Hueflow.zip`, so they pick up the new release automatically.
+
+To ship a build that opens without the Gatekeeper warning, join the Apple Developer Program, create a Developer ID
+Application certificate and run:
+
+```sh
+xcrun notarytool store-credentials hueflow   # once
+DEVELOPER_ID="Developer ID Application: Your Name (TEAMID)" NOTARY_PROFILE=hueflow native/build.sh
+```
+
+## License
+
+MIT, see [LICENSE](LICENSE). The rendering is a port of [ShaderGradient](https://github.com/ruucm/shadergradient) by ruucm (MIT).

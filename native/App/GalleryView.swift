@@ -149,8 +149,6 @@ enum Thumbs {
 
 struct GalleryRoot: View {
     @ObservedObject var store: Store
-    @ObservedObject var license: License
-    @State private var showLicense = false
     @State private var focused: Entry = presets[0]
     @State private var editing: Entry?
     @State private var draft: Props = [:]
@@ -178,19 +176,14 @@ struct GalleryRoot: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .sheet(isPresented: $showLicense) {
-            LicenseSheet(license: license)
-        }
         .animation(tvSpring, value: editing?.identity)
         .animation(tvSpring, value: store.toast)
         .preferredColorScheme(.dark)
         .onAppear { focused = store.current.map { d in presets.first { $0.props.key == d.props.key } ?? d } ?? presets[0] }
     }
 
-    /// Free version: only presets[0] as wallpaper and no editor; anything else opens the purchase sheet.
-    private func locked(_ e: Entry) -> Bool { !license.isUnlocked && e.props != presets[0].props }
-    private func open(_ e: Entry) { if license.isUnlocked { draft = e.props; editing = e } else { showLicense = true } }
-    private func use(_ e: Entry) { if locked(e) { showLicense = true } else { store.apply(e); store.show("Set as wallpaper") } }
+    private func open(_ e: Entry) { draft = e.props; editing = e }
+    private func use(_ e: Entry) { store.apply(e); store.show("Set as wallpaper") }
     private func close() {
         if let e = editing { focused = Entry(id: e.id, name: e.name, props: draft, builtin: e.builtin) }
         editing = nil
@@ -199,14 +192,6 @@ struct GalleryRoot: View {
     private var browse: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center) {
-                Button { showLicense = true } label: {
-                    switch license.state {
-                    case .free: Label("Unlock All Gradients", systemImage: "sparkles")
-                    case .licensed: Label("Hueflow", systemImage: "checkmark.seal.fill")
-                    }
-                }
-                .buttonStyle(GlassButton())
-                .padding(.leading, 64) // clear the traffic lights
                 Spacer()
                 Button { showSaver.toggle() } label: { Label("Screen Saver", systemImage: "moon.stars.fill") }
                     .buttonStyle(GlassButton())
@@ -223,9 +208,9 @@ struct GalleryRoot: View {
                     .contentTransition(.opacity)
                     .id(focused.name)
                 HStack(spacing: 10) {
-                    Button { use(focused) } label: { Label(locked(focused) ? "Unlock to Use" : "Set as Wallpaper", systemImage: locked(focused) ? "lock.fill" : "desktopcomputer") }
+                    Button { use(focused) } label: { Label("Set as Wallpaper", systemImage: "desktopcomputer") }
                         .buttonStyle(PrimaryButton())
-                    Button { open(focused) } label: { Label("Edit", systemImage: license.isUnlocked ? "slider.horizontal.3" : "lock.fill") }
+                    Button { open(focused) } label: { Label("Edit", systemImage: "slider.horizontal.3") }
                         .buttonStyle(GlassButton())
                 }
                 .padding(.top, 8)
@@ -234,9 +219,9 @@ struct GalleryRoot: View {
             .animation(.easeInOut(duration: 0.3), value: focused.name)
 
             VStack(alignment: .leading, spacing: 18) {
-                Row(title: "Featured", entries: presets, store: store, focused: $focused, open: open, use: use, locked: locked)
+                Row(title: "Featured", entries: presets, store: store, focused: $focused, open: open, use: use)
                 if !store.cfg.custom.isEmpty {
-                    Row(title: "My Gradients", entries: store.cfg.custom, store: store, focused: $focused, open: open, use: use, locked: locked)
+                    Row(title: "My Gradients", entries: store.cfg.custom, store: store, focused: $focused, open: open, use: use)
                 }
             }
             .padding(.top, 28).padding(.bottom, 28)
@@ -256,7 +241,6 @@ struct Row: View {
     @Binding var focused: Entry
     let open: (Entry) -> Void
     let use: (Entry) -> Void
-    let locked: (Entry) -> Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -265,7 +249,7 @@ struct Row: View {
                 LazyHStack(spacing: 22) {
                     let current = store.current?.props
                     ForEach(entries, id: \.identity) { e in
-                        Card(entry: e, current: current == e.props, focused: focused.identity == e.identity, locked: locked(e))
+                        Card(entry: e, current: current == e.props, focused: focused.identity == e.identity)
                             .onTapGesture { focused = e } // no double-click: SwiftUI would hold every single click until it times out
                             .contextMenu {
                                 Button("Set as Wallpaper") { use(e) }
@@ -289,7 +273,6 @@ struct Card: View {
     let entry: Entry
     let current: Bool
     let focused: Bool
-    let locked: Bool
     @State private var image: NSImage?
     @State private var tilt: CGPoint? // cursor over the thumbnail, -1…1 per axis; nil when not hovered
     private var lifted: Bool { focused || tilt != nil }
@@ -310,10 +293,7 @@ struct Card: View {
                 .overlay(RadialGradient(colors: [.white.opacity(tilt == nil ? 0 : 0.28), .clear],
                                         center: UnitPoint(x: ((tilt?.x ?? 0) + 1) / 2, y: ((tilt?.y ?? 0) + 1) / 2), startRadius: 0, endRadius: 180)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous)).allowsHitTesting(false))
-                if locked {
-                    Image(systemName: "lock.circle.fill").font(.system(size: 18)).symbolRenderingMode(.palette)
-                        .foregroundStyle(.white, .black.opacity(0.35)).padding(8)
-                } else if current {
+                if current {
                     Image(systemName: "checkmark.circle.fill").font(.system(size: 18)).symbolRenderingMode(.palette)
                         .foregroundStyle(.white, .black.opacity(0.35)).padding(8)
                 }
@@ -460,56 +440,6 @@ struct ControlRow: View {
                 }
             }
         }
-    }
-}
-
-// MARK: - License
-
-struct LicenseSheet: View {
-    @ObservedObject var license: License
-    @Environment(\.dismiss) private var dismiss
-    @State private var key = ""
-    @State private var error: String?
-    @State private var busy = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Hueflow").font(.system(size: 26, weight: .bold))
-            switch license.state {
-            case .licensed:
-                Label("Activated on this Mac. Thank you!", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
-                HStack {
-                    Button("Deactivate This Mac") { Task { busy = true; await license.deactivate(); busy = false } }.disabled(busy)
-                    Spacer()
-                    Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
-                }
-            case .free:
-                Text("The free version includes the \(presets[0].name) wallpaper. Buy once to unlock every gradient, the editor and your own gradients, forever.").foregroundStyle(.secondary)
-                Button { NSWorkspace.shared.open(LicenseConfig.checkoutURL) } label: {
-                    Text("Buy Hueflow").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(PrimaryButton())
-                Divider()
-                Text("Already bought it? Paste the license key from your receipt email:").font(.callout)
-                TextField("XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX", text: $key).textFieldStyle(.roundedBorder).font(.body.monospaced())
-                if let error { Text(error).font(.callout).foregroundStyle(.red) }
-                HStack {
-                    Button("Later") { dismiss() }
-                    Spacer()
-                    Button(busy ? "Activating…" : "Activate") {
-                        busy = true; error = nil
-                        Task {
-                            do { try await license.activate(key) } catch { self.error = error.localizedDescription }
-                            busy = false
-                        }
-                    }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(busy || key.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-            }
-        }
-        .padding(24)
-        .frame(width: 420)
     }
 }
 

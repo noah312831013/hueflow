@@ -5,15 +5,12 @@ import SwiftUI
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let store = Store()
-    let license = License()
     private var gallery: NSWindow?
 
     func applicationDidFinishLaunching(_ n: Notification) {
         GradientView.audioLevel = { AudioTap.shared.level() }
         NSApp.mainMenu = mainMenu()
         store.onShowGallery = { [weak self] in self?.showGallery() }
-        store.isUnlocked = { [weak self] in self?.license.isUnlocked ?? false }
-        license.onChange = { [weak self] in self?.store.refresh() }
         store.start()
         // Started at login: just put the wallpaper up; the gallery opens from the menu bar.
         let event = NSAppleEventManager.shared().currentAppleEvent
@@ -40,7 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         w.backgroundColor = .black
         w.isReleasedWhenClosed = false
         w.delegate = self
-        w.contentView = NSHostingView(rootView: GalleryRoot(store: store, license: license))
+        w.contentView = NSHostingView(rootView: GalleryRoot(store: store))
         w.center()
         w.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)

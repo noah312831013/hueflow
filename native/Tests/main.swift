@@ -33,7 +33,7 @@ let panned = back.camera(.pan(dx: 100, dy: 0, viewHeight: 800))
 assert(panned.num("positionX", 0) < 0 && abs(panned.num("positionY", 0)) < 1e-9, "seen from -z, screen-right is world -x")
 assert(back.camera(.pan(dx: 0, dy: 100, viewHeight: 800)).num("positionY", 0) < 0, "dragging down moves the model down")
 
-assert(presets.count == 11 && presets[0].name == "Afterglow" && presets[1].name == "Halo") // presets[0] is the free wallpaper
+assert(presets.count == 11 && presets[0].name == "Afterglow" && presets[1].name == "Halo") // presets[0] is the default wallpaper
 assert(Renderer.shared.snapshot(presets[0].props, width: 64, height: 40) != nil, "Metal renders offscreen")
 let half = Renderer.shared.makeTargets(width: 101, height: 40, scale: 0.5)
 assert(half.scene.width == 51 && half.scene.height == 20 && half.depth.width == 51, "half-res scene targets")
@@ -64,4 +64,12 @@ assert(shift.strength == s0 && shift.c1 == GradientParams(["color1": .str("#00ff
 var swell = GradientParams(["music": .str("on"), "musicIntensity": .num(1)])
 swell.react(to: 1)
 assert(swell.strength == GradientParams([:]).strength * 2, "strength mode doubles at a full beat")
+// Menu bar mask: bar and the corner outside the curve are filled, the wallpaper under the bar is not.
+let mask = screenMaskPath(width: 1512, height: 982, menuBar: 33, bottom: true)
+assert(mask.contains(CGPoint(x: 756, y: 970)) && mask.contains(CGPoint(x: 0.5, y: 948)) && mask.contains(CGPoint(x: 1511.5, y: 948)), "bar and corners filled")
+assert(!mask.contains(CGPoint(x: 756, y: 948)) && !mask.contains(CGPoint(x: 8, y: 941)) && !mask.contains(CGPoint(x: 1504, y: 941)) && !mask.contains(CGPoint(x: 0.5, y: 930)), "wallpaper shows below")
+assert(mask.contains(CGPoint(x: 0.5, y: 0.5)) && mask.contains(CGPoint(x: 1511.5, y: 0.5)), "bottom corners filled")
+assert(!mask.contains(CGPoint(x: 8, y: 8)) && !mask.contains(CGPoint(x: 1504, y: 8)) && !mask.contains(CGPoint(x: 756, y: 0.5)) && !mask.contains(CGPoint(x: 0.5, y: 30)), "wallpaper shows at the bottom")
+assert(!screenMaskPath(width: 1512, height: 982, menuBar: 33, bottom: false).contains(CGPoint(x: 0.5, y: 0.5)), "bottom corners are their own option")
+assert(!screenMaskPath(width: 1512, height: 982, menuBar: nil, bottom: true).contains(CGPoint(x: 756, y: 970)), "menu bar is its own option")
 print("all tests passed")

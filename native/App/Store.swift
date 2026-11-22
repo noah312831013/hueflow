@@ -33,6 +33,9 @@ struct Config: Codable {
     var tileMemory = true        // depth/MSAA buffers in GPU tile memory
     var saveEnergy = true        // 15 fps in Low Power Mode or when the Mac runs hot
     var hideDockIcon = false
+    // Built-in display only, to look like its physical rounded corners:
+    var menuBarMask = false      // black menu bar with rounded corners below it
+    var bottomCorners = false    // rounded corners at the bottom of the screen
     var saver = SaverSettings()
 
     init() {}
@@ -47,6 +50,8 @@ struct Config: Codable {
         pauseOnBattery = try c.decodeIfPresent(Bool.self, forKey: .pauseOnBattery) ?? true
         pauseInFullScreen = try c.decodeIfPresent(Bool.self, forKey: .pauseInFullScreen) ?? true
         hideDockIcon = try c.decodeIfPresent(Bool.self, forKey: .hideDockIcon) ?? false
+        menuBarMask = try c.decodeIfPresent(Bool.self, forKey: .menuBarMask) ?? false
+        bottomCorners = try c.decodeIfPresent(Bool.self, forKey: .bottomCorners) ?? false
         antialias = try c.decodeIfPresent(Bool.self, forKey: .antialias) ?? true
         lowerFrameRate = try c.decodeIfPresent(Bool.self, forKey: .lowerFrameRate) ?? true
         halfResolution = try c.decodeIfPresent(Bool.self, forKey: .halfResolution) ?? true
@@ -65,7 +70,10 @@ struct Display: Identifiable, Hashable {
 
 extension NSScreen {
     var displayID: UInt32 { (deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0 }
+    /// Menu bar height (notch height when the menu bar auto-hides).
+    var menuBarHeight: CGFloat { max(frame.maxY - visibleFrame.maxY, safeAreaInsets.top) }
 }
+
 
 @MainActor
 final class Store: ObservableObject {
@@ -78,8 +86,6 @@ final class Store: ObservableObject {
     private var saverStartedAt = Date.distantPast
     private var statusItem: NSStatusItem?
     var onShowGallery: () -> Void = {}
-    /// Licensed. Otherwise every display and the screen saver show only the free wallpaper, presets[0].
-    var isUnlocked: () -> Bool = { true }
 
     private static let dir: URL = {
         let d = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Hueflow")
@@ -92,9 +98,6 @@ final class Store: ObservableObject {
         Renderer.shared.antialias = cfg.antialias
         Renderer.shared.tileMemory = cfg.tileMemory
     }
-
-    /// Re-applies everything after the license state changes.
-    func refresh() { changed() }
 
     func start() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -139,9 +142,8 @@ final class Store: ObservableObject {
     var displays: [Display] {
         NSScreen.screens.enumerated().map { i, s in Display(id: s.displayID, label: s.localizedName.isEmpty ? "Display \(i + 1)" : s.localizedName) }
     }
-    /// The wallpaper actually shown on displays without their own pick: the free version always shows presets[0].
-    var current: Entry? { isUnlocked() ? cfg.default : presets[0] }
-    func entry(for id: UInt32) -> Entry? { isUnlocked() ? cfg.perDisplay[String(id)] ?? cfg.default : presets[0] }
+    var current: Entry? { cfg.default }
+    func entry(for id: UInt32) -> Entry? { cfg.perDisplay[String(id)] ?? cfg.default }
     func isEnabled(_ id: UInt32) -> Bool { !cfg.disabled.contains(id) }
 
     private func changed(rebuild: Bool = true) {
@@ -153,7 +155,6 @@ final class Store: ObservableObject {
 
     /// target: nil = all displays.
     func apply(_ entry: Entry, to target: UInt32? = nil) {
-        guard isUnlocked() || entry.props == presets[0].props else { return }
         let e = Entry(name: entry.name, props: entry.props)
         if let t = target {
             cfg.perDisplay[String(t)] = e
@@ -277,7 +278,18 @@ final class Store: ObservableObject {
             w.isReleasedWhenClosed = false
             w.backgroundColor = .black
             let props = (entry(for: screen.displayID) ?? presets[0]).props
-            w.contentView = GradientView(props: props)
+            let v = GradientView(props: props)
+            if let path = maskPath(screen) {
+                // Own layer-backed overlay: the MTKView has no layer until it's in a window.
+                let overlay = NSView(frame: NSRect(origin: .zero, size: screen.frame.size))
+                overlay.wantsLayer = true
+                let mask = CAShapeLayer()
+                mask.path = path
+                mask.fillColor = .black
+                overlay.layer?.addSublayer(mask)
+                v.addSubview(overlay)
+            }
+            w.contentView = v
             w.orderFrontRegardless()
             matchSystemWallpaper(screen, props)
             return w
@@ -286,19 +298,35 @@ final class Store: ObservableObject {
 
     /// macOS styles the menu bar (text color, legibility haze) and the lock screen from the system wallpaper, not from our
     /// window, so set a still of the same gradient as the system wallpaper.
+    /// The Displays menu's black menu bar and bottom corners, on the built-in display only; nil = neither.
+    private func maskPath(_ screen: NSScreen) -> CGPath? {
+        guard CGDisplayIsBuiltin(screen.displayID) != 0, cfg.menuBarMask || cfg.bottomCorners else { return nil }
+        return screenMaskPath(width: screen.frame.width, height: screen.frame.height, menuBar: cfg.menuBarMask ? screen.menuBarHeight : nil, bottom: cfg.bottomCorners)
+    }
+
     private func matchSystemWallpaper(_ screen: NSScreen, _ props: Props) {
         let fm = FileManager.default
         let dir = Self.dir.appendingPathComponent("Wallpapers")
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         // FNV-1a of the props: a new file name per gradient, because macOS caches images by URL.
-        let hash = props.key.utf8.reduce(UInt64(14695981039346656037)) { ($0 ^ UInt64($1)) &* 1099511628211 }
+        let mask = maskPath(screen)
+        let maskKey = mask == nil ? "" : "mask:\(cfg.menuBarMask ? screen.menuBarHeight : 0),\(cfg.bottomCorners),r:\(screenCornerRadius)"
+        let hash = (props.key + maskKey).utf8.reduce(UInt64(14695981039346656037)) { ($0 ^ UInt64($1)) &* 1099511628211 }
         let prefix = "display-\(screen.displayID)-"
         let url = dir.appendingPathComponent(prefix + String(hash, radix: 16) + ".jpg")
         guard NSWorkspace.shared.desktopImageURL(for: screen) != url else { return }
         if !fm.fileExists(atPath: url.path) {
             let scale = screen.backingScaleFactor
-            guard let img = Renderer.shared.snapshot(props, width: Int(screen.frame.width * scale), height: Int(screen.frame.height * scale), elapsed: GradientView.stillTime),
-                  let jpg = NSBitmapImageRep(cgImage: img).representation(using: .jpeg, properties: [.compressionFactor: 0.9]) else { return }
+            guard var img = Renderer.shared.snapshot(props, width: Int(screen.frame.width * scale), height: Int(screen.frame.height * scale), elapsed: GradientView.stillTime) else { return }
+            // The mask is in the still too: macOS picks the menu bar text color from it.
+            if let mask, let ctx = CGContext(data: nil, width: img.width, height: img.height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                             bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue) {
+                ctx.draw(img, in: CGRect(x: 0, y: 0, width: img.width, height: img.height))
+                ctx.scaleBy(x: scale, y: scale)
+                ctx.addPath(mask); ctx.fillPath()
+                img = ctx.makeImage() ?? img
+            }
+            guard let jpg = NSBitmapImageRep(cgImage: img).representation(using: .jpeg, properties: [.compressionFactor: 0.9]) else { return }
             try? jpg.write(to: url)
         }
         try? NSWorkspace.shared.setDesktopImageURL(url, for: screen, options: [:])
@@ -361,8 +389,7 @@ final class Store: ObservableObject {
     // MARK: built-in screen saver
 
     private var saverOptions: SaverOptions {
-        isUnlocked() ? SaverOptions(shuffle: cfg.saver.source == "shuffle", clock: cfg.saver.clock, props: cfg.default?.props, extra: cfg.custom.map(\.props))
-            : SaverOptions(shuffle: false, clock: cfg.saver.clock, props: presets[0].props, extra: [])
+        SaverOptions(shuffle: cfg.saver.source == "shuffle", clock: cfg.saver.clock, props: cfg.default?.props, extra: cfg.custom.map(\.props))
     }
 
     // shortcut: idle is polled and the saver is our own window, so it only runs while the app is open; the System
@@ -421,7 +448,6 @@ final class Store: ObservableObject {
 
     // MARK: System Settings .saver
 
-    // shortcut: an installed .saver keeps the gradients it was installed with after a license is deactivated; have the saver check the license if that matters.
     /// Copies the bundled Hueflow.saver with the current saver settings and a thumbnail baked in, signs it ad hoc,
     /// installs it to ~/Library/Screen Savers and opens System Settings so it can be picked.
     func installSaver() async throws {
@@ -494,7 +520,7 @@ final class Store: ObservableObject {
         // Everyday actions at the top level; settings grouped in submenus.
         item("Open Hueflow") { [weak self] in self?.onShowGallery() }
         item("Pause", checked: cfg.paused) { [weak self] in self?.toggle(\.paused) }
-        if !cfg.recent.isEmpty && isUnlocked() {
+        if !cfg.recent.isEmpty {
             m.addItem(.separator())
             m.addItem(.sectionHeader(title: "Recent"))
             let current = self.current?.props.key
@@ -517,6 +543,9 @@ final class Store: ObservableObject {
         }
         submenu("Displays") { sub in
             for d in displays { item("Show on \(d.label)", checked: isEnabled(d.id), in: sub) { [weak self] in self?.setEnabled(d.id, !(self?.isEnabled(d.id) ?? true)) } }
+            sub.addItem(.separator())
+            item("Black Menu Bar (Built-in Display)", checked: cfg.menuBarMask, in: sub) { [weak self] in self?.cfg.menuBarMask.toggle(); self?.changed() }
+            item("Rounded Bottom Corners (Built-in Display)", checked: cfg.bottomCorners, in: sub) { [weak self] in self?.cfg.bottomCorners.toggle(); self?.changed() }
         }
         m.addItem(.separator())
         item("Open at Login", checked: opensAtLogin) { [weak self] in self?.setOpensAtLogin(!(self?.opensAtLogin ?? false)) }
