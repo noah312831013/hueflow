@@ -7,7 +7,7 @@
 <meta name="description" content="Hueflow turns your Mac desktop into slow, flowing 3D gradients. Native Metal, menu bar controls, screen saver included. Free and open source.">
 <meta property="og:title" content="Hueflow — living gradient wallpapers for Mac">
 <meta property="og:description" content="Flowing 3D gradient wallpapers and screen saver for macOS. Free and open source.">
-<meta property="og:image" content="assets/hero.jpg">
+<meta property="og:image" content="https://hueflow-eight.vercel.app/assets/og.jpg">
 <link rel="icon" href="assets/icon.png">
 <style>
   :root { --spring: cubic-bezier(.2, .9, .25, 1.1); --ease: cubic-bezier(.25, .1, .25, 1); }
@@ -43,6 +43,11 @@
   h2 { font-size: clamp(34px, 5vw, 56px); letter-spacing: -.03em; line-height: 1.05; font-weight: 750; }
   .lead { font-size: 21px; color: #a1a1a6; max-width: 640px; margin-top: 16px; }
 
+  .app-preview { display: block; width: 100%; height: auto; margin-top: 40px; }
+  .shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 28px; margin-top: 24px; }
+  .shots img { display: block; width: 100%; height: auto; }
+  .shots figcaption { color: #a1a1a6; font-size: 15px; text-align: center; margin-top: 4px; }
+  .shots figcaption b { color: #f5f5f7; display: block; font-size: 17px; }
   .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 22px; margin-top: 48px; }
   .card { cursor: pointer; transition: transform .45s var(--spring); }
   .card img { width: 100%; aspect-ratio: 16/10; object-fit: cover; border-radius: 16px; display: block; box-shadow: 0 8px 24px rgba(0,0,0,.4); transition: box-shadow .45s var(--ease); }
@@ -124,6 +129,7 @@
 <nav>
   <div class="wrap">
     <a class="brand" href="#"><img src="assets/icon.png" alt="">Hueflow</a>
+    <a class="link" href="#app">App</a>
     <a class="link" href="#gallery">Gallery</a>
     <a class="link" href="#editor">Editor</a>
     <a class="link" href="#features">Features</a>
@@ -147,6 +153,16 @@
 </header>
 
 <main class="wrap">
+  <section id="app" class="reveal">
+    <h2>Meet Hueflow.</h2>
+    <p class="lead">A live gradient behind your icons and menu bar, and a native app to pick, tweak and save your own.</p>
+    <img class="app-preview" src="assets/app/preview.webp" width="1600" height="800" alt="The Afterglow gradient as a live wallpaper on a MacBook Pro">
+    <div class="shots">
+      <figure><img src="assets/app/gallery.webp" width="1200" height="804" alt="The Hueflow gallery with featured and saved gradients" loading="lazy"><figcaption><b>Gallery</b>Pick a gradient for every display, or one per display</figcaption></figure>
+      <figure><img src="assets/app/editor.webp" width="1200" height="804" alt="The Hueflow editor with Shape, Colors, Effects and Camera tabs" loading="lazy"><figcaption><b>Editor</b>Reshape shape, colors, light and camera live</figcaption></figure>
+    </div>
+  </section>
+
   <section id="gallery" class="reveal">
     <h2>Eleven looks to start.<br>Infinite to make.</h2>
     <p class="lead">Click a gradient to see it come alive. Every one is fully editable — shape, patterns, colors, light and camera.</p>

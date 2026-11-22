@@ -1,10 +1,29 @@
-# Hueflow
+<p align="center">
+  <img src="src/Preview.png" alt="Hueflow's Afterglow gradient as a live wallpaper on a MacBook Pro">
+</p>
 
-Living 3D gradient wallpapers and a screen saver for macOS, rendered natively with Metal. Free and open source (MIT).
+<p align="center">
+  <img src="src/Hueflow-icon-1024.png" width="112" alt="Hueflow icon">
+</p>
 
-**Website:** https://hueflow-eight.vercel.app
+<h1 align="center">Hueflow</h1>
 
-## Download
+<p align="center">
+  Living 3D gradient wallpapers and a screen saver for macOS, rendered natively with Metal.<br>
+  Free and open source.
+</p>
+
+<p align="center">
+  <a href="https://github.com/noah312831013/hueflow/releases/latest/download/Hueflow.zip"><b>Download</b></a>
+  &nbsp;·&nbsp;
+  <a href="https://hueflow-eight.vercel.app">Website</a>
+  &nbsp;·&nbsp;
+  <a href="LICENSE">MIT License</a>
+</p>
+
+<p align="center"><sub>macOS 14 Sonoma or later · Apple silicon &amp; Intel</sub></p>
+
+## Install
 
 1. Download **Hueflow.zip** from the [latest release](https://github.com/noah312831013/hueflow/releases/latest) and unzip it.
 2. Move **Hueflow.app** to Applications and open it.
@@ -14,16 +33,36 @@ Living 3D gradient wallpapers and a screen saver for macOS, rendered natively wi
    xattr -dr com.apple.quarantine /Applications/Hueflow.app
    ```
 
-Requires macOS 14 Sonoma or later, Apple silicon or Intel.
+## Gallery
 
-## Repository
+Pick a gradient and set it as your wallpaper, on every display or one at a time.
+
+<p align="center"><img src="src/Interface.png" alt="The Hueflow gallery with featured and saved gradients"></p>
+
+## Editor
+
+Reshape any gradient live: shape, patterns, colors, light, effects and camera. Save your own and use them as wallpapers or
+in the screen saver.
+
+<p align="center"><img src="src/Interface_Edit.png" alt="The Hueflow editor with Shape, Colors, Effects and Camera tabs"></p>
+
+## Features
+
+- **Live 3D wallpapers** behind your icons and menu bar, with smooth transitions when you switch or tweak a gradient.
+- **Screen saver**, both a built-in idle screen saver and one for System Settings.
+- **Music reactivity:** gradients can move and shift color with the bass of whatever your Mac is playing (macOS 14.2+).
+- **Light on battery:** pauses on battery, behind full-screen apps and when covered, plus performance options in the menu bar.
+- **MacBook Pro corners:** an optional black menu bar and rounded bottom corners that match the physical screen.
+- **Private:** no account, no tracking, no network access.
+
+## Development
 
 ```
 native/   the Mac app (Swift + Metal), built with swiftc; no Xcode project
 site/     the website (static HTML)
 ```
 
-## The app
+### The app
 
 - **Rendering:** a Metal port of [ShaderGradient](https://github.com/ruucm/shadergradient) (MIT, © ruucm). It covers the plane, water and sphere shapes, the noise, the color formulas, the camera and the halftone grain. Wallpapers, the gallery, thumbnails and the screen saver all share one renderer.
 - **Beyond ShaderGradient:** shape and color patterns (noise, warp, cells, ridged, waves) with scale and sharpness, mesh subdivision, grain amount and size, music-reactive strength (a Core Audio tap on the system output follows the bass; macOS 14.2+), depth-of-field bokeh (focus and blur, a 16-tap gather on the scene before the grain), optional 4× MSAA (on by default) and an optional Retina-resolution grain pass for smoother silhouettes. Gradients that use these no longer match shadergradient.co.
@@ -43,7 +82,7 @@ Settings are stored in `~/Library/Application Support/Hueflow/config.json`.
 
 "Environment" lighting approximates the city/dawn/lobby HDRs with a procedural sky, so those presets differ slightly from shadergradient.co.
 
-## The website
+### The website
 
 `site/index.html` is the landing page and `site/legal.html` holds the license and privacy notes. The hero gradient and the "Make it yours" editor use the ShaderGradient React library. `site/build.mjs` hooks the library's shader compile so `site/src/patterns.js` can add the app's patterns to the editor. The hook matches `@shadergradient/react` 2.4.20 exactly (pinned in `package.json`), and the build fails if a library update changes that code. Bundle with:
 
@@ -60,7 +99,7 @@ native/site-thumbs.sh
 
 Host `site/` on any static host (Vercel, Netlify, GitHub Pages).
 
-## Releasing
+### Releasing
 
 Bump `CFBundleShortVersionString` and `CFBundleVersion` in `native/App/Info.plist` and `native/Saver/Info.plist`, then:
 
